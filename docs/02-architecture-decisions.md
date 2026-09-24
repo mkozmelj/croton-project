@@ -90,6 +90,8 @@ system: [
 ```
 - **1-hour TTL, not the 5-minute default.** The athlete messages sporadically (a few times a day at most, sometimes gaps of many hours) — a 5-minute cache would cold-write on almost every real interaction. The 1-hour TTL's higher write cost (2x vs 1.25x) pays off at ~3 reads, which is the realistic pattern for a day with a couple of messages plus an activity-summary webhook or two.
 - Sonnet 5's minimum cacheable prefix is 1,024 tokens — the ~3-4K token static block clears that comfortably.
+- **Haiku 4.5's minimum is 4,096 tokens** (added 2026-09-24, Phase 1). The Phase 1 static prompt measures 2,204 tokens on Sonnet 5 and 1,557 on Haiku 4.5 (`count_tokens`), so **Haiku calls do not cache at all** — a 1h write is attempted, silently skipped, and billed as plain input. Harmless at Haiku prices (activity summaries, quick chat), but it means ADR-004's savings only apply to Sonnet calls until the static block grows past ~4K Haiku tokens (Phase 4's book distillation will likely get it there). It is also why Phase 1 chat runs on Sonnet (ADR-005, `chat` row): the Phase 1 acceptance check is a cache read on the second message.
+- **Verified 2026-09-24:** two consecutive Sonnet calls through `src/agent/claude.ts` → call 1 `cache_creation_input_tokens: 2198` (all 1h), call 2 `cache_read_input_tokens: 2198`.
 - `STATIC_SYSTEM_PROMPT` must be byte-identical across calls: no timestamps, no non-deterministic serialization anywhere in that string. Verify with `response.usage.cache_read_input_tokens` during Phase 1 smoke-testing — if it's zero after the second call in a session, something in the "static" block isn't actually static.
 
 ---
@@ -102,6 +104,7 @@ system: [
 
 | Classification | Model | Thinking | Effort | Rationale |
 |---|---|---|---|---|
+| `chat` (Phase 1–4: every free-text message, until the Phase 5 router exists) | Sonnet | adaptive (on) | `low` | No classifier yet, so review doc #13's "default to Sonnet when uncertain" applies to everything. Low effort keeps day-to-day chat cheap. Retired or re-pointed when the router lands. |
 | `plan_generation` (Sunday recap) | Sonnet | adaptive (on) | `medium` | Highest-stakes output of the week; quality matters more than the marginal cost here. |
 | `plan_adjustment` | Sonnet | adaptive (on) | `low` | Usually a bounded, well-specified edit ("move Thursday's run") — doesn't need deep reasoning. |
 | `analysis` | Sonnet | adaptive (on) | `medium` | Trend analysis benefits from actually reasoning through the data. |
@@ -111,7 +114,18 @@ system: [
 
 **Kill switch:** `DISABLE_THINKING=true` in env (validated in `src/config/env.ts`) makes `src/agent/claude.ts` send `thinking: {type: "disabled"}` and drop `effort` on every Sonnet call — flip it in Railway's variables if thinking tokens are eating the monthly budget, no code change or redeploy of new code needed. The per-row policy above lives only inside the wrapper, per the stack doc's "one wrapper for all Claude calls" convention.
 
-Re-derive spec.md §8.4's monthly estimate once this is locked in — thinking tokens bill as output tokens at $15/MTok for Sonnet.
+**Re-derived monthly estimate (2026-09-24, replaces spec.md §8.4).** Prices from `src/config/pricing.ts` converted at `USD_TO_EUR = 0.92`: Sonnet 5 €2.76 in / €13.80 out / €5.52 1h cache write / €0.28 cache read per MTok; Haiku 4.5 €0.92 in / €4.60 out. Static prefix measured at 2.2K tokens. Thinking token counts are assumptions (low ≈ 0.5–1K, medium ≈ 2–4K per call) — check them against real `llm_usage.output_tokens` after a few weeks.
+
+| Interaction | Model / effort | Tokens: uncached in + cached in / out (visible + thinking) | Est. cost |
+|---|---|---|---|
+| Chat message | Sonnet / low | 3K + 2.2K / 0.4K + 0.7K | ~€0.024 |
+| Sunday recap + plan | Sonnet / medium | 13K + 2.2K / 3K + 4K | ~€0.13 |
+| Plan adjustment | Sonnet / low | 8K + 2.2K / 1.5K + 1K | ~€0.057 |
+| Analysis | Sonnet / medium | 8K + 2.2K / 1K + 3K | ~€0.077 |
+| Activity summary | Haiku / none (no caching, see ADR-004) | 3K / 0.3K | ~€0.004 |
+| Cold cache write | Sonnet 1h write, ~1 per active day | 2.2K | ~€0.012 |
+
+Typical month: 60 chats €1.44 + 4 recaps €0.52 + 8 adjustments €0.46 + 8 analyses €0.62 + 20 summaries €0.08 + 30 cold writes €0.37 ≈ **€3.50** (spec.md's €1.14 was ~3× low, mostly thinking tokens and all-Sonnet chat). If thinking runs at double the assumption: ~€6. Both are well under the €14 cap, so thinking stays on; `DISABLE_THINKING` is the lever if real numbers drift toward the 75% alert. Once the Phase 5 router moves most chat to Haiku, the chat line drops to ~€0.4/month.
 
 ---
 
@@ -146,6 +160,11 @@ On bot startup, don't try to resume mid-flow conversationally — if a pending a
 **Problem:** Spec.md §8.2 hardcodes per-model pricing inline in `calculateCost()`. Every model price change (and there will be more, per ADR-001) means a code edit.
 
 **Decision:** Pricing lives in `src/config/pricing.ts` as a plain exported object keyed by the same model constants from ADR-001, imported by both the cost calculator and any future admin/`​/budget` display code. Still a code file, not a DB table or remote config — a single-operator app doesn't need runtime-configurable pricing, just a change that's easy to find and impossible to miss when a model is bumped (co-locate with `MODELS` in the same review).
+
+**Implementation notes (Phase 1):**
+- `pricing.ts` imports `MODELS` from `env.ts`; `env.ts` does **not** re-export `PRICING` (the build plan's original wording). A re-export would make the two modules import each other, and `PRICING`'s computed keys would read `MODELS` before it's initialized. Import `PRICING` from `src/config/pricing.ts` directly.
+- The table also holds the cache multipliers (1h write 2×, 5m write 1.25×, read 0.1×) and a fixed `USD_TO_EUR` rate (0.92, deliberately on the high side so tracked spend errs toward overestimating). `llm_usage` stores `cache_creation_input_tokens` / `cache_read_input_tokens` next to the plain token counts, so cost and cache behaviour can be audited per call.
+- Sonnet 5 is priced at $3 / $15 per ADR-001 (post-intro-discount). Some reference tables still list the $2 / $10 intro price; if the console bill shows the lower rate, `llm_usage` is over-counting by ~33%, which is the safe direction.
 
 ---
 

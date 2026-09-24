@@ -29,4 +29,6 @@ One module, one responsibility — no file both queries the DB and formats Teleg
 
 ## Current status
 
-Phase 0 done: private repo `mkozmelj/croton-project`, deployed on Railway at `https://croton-project-production.up.railway.app` (`/health` responds). Next step is `docs/03-build-plan.md` Phase 1. Use Node 24 (`nvm use`, reads `.nvmrc`).
+Phase 0 done: private repo `mkozmelj/croton-project`, deployed on Railway at `https://croton-project-production.up.railway.app` (`/health` responds). Phase 1 code complete (bot + Claude wrapper + budget); remaining: Railway deploy and the end-to-end Telegram acceptance check in `docs/03-build-plan.md`. Use Node 24 (`nvm use`, reads `.nvmrc`).
+
+Local dev (`npm run dev`, `NODE_ENV=development`) uses Telegram long polling, and grammy **deletes the registered webhook** when polling starts — so running dev with the prod bot token silently disconnects production until the next deploy. Use a separate dev bot from BotFather for local work.

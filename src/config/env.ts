@@ -1,17 +1,77 @@
 import { z } from "zod";
 
-// Phase 0: only what the /health server needs. Phase 1 extends this schema with
-// every var from .env.example and adds MODELS (ADR-001).
-const envSchema = z.object({
-  NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
-  PORT: z.coerce.number().int().positive().default(3000),
-  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
-});
+// ADR-001: the only place model IDs are written down. Bump here + re-check pricing.ts.
+export const MODELS = {
+  sonnet: "claude-sonnet-5",
+  haiku: "claude-haiku-4-5",
+} as const;
+
+export type ModelId = (typeof MODELS)[keyof typeof MODELS];
+
+// z.coerce.boolean() turns the string "false" into true — parse the literal instead.
+const booleanString = z
+  .enum(["true", "false"])
+  .default("false")
+  .transform((value) => value === "true");
+
+const optionalSecret = z.string().min(1).optional();
+
+const envSchema = z
+  .object({
+    NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+    PORT: z.coerce.number().int().positive().default(3000),
+    LOG_LEVEL: z
+      .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
+      .default("info"),
+    APP_URL: z.url().optional(),
+    TIMEZONE: z.string().min(1).default("Europe/Ljubljana"),
+    MONTHLY_LLM_BUDGET_EUR: z.coerce.number().positive().default(14),
+
+    TELEGRAM_BOT_TOKEN: z.string().min(1),
+    TELEGRAM_WEBHOOK_SECRET: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{16,256}$/, "must be 16-256 chars of A-Z, a-z, 0-9, _ or -")
+      .optional(),
+    TELEGRAM_AUTHORIZED_CHAT_ID: z.coerce.number().int(),
+
+    ANTHROPIC_API_KEY: z.string().min(1),
+    DISABLE_THINKING: booleanString,
+
+    DATABASE_URL: z.string().min(1),
+
+    // Phase 2+ integrations. Optional until the phase that uses them makes them required.
+    STRAVA_CLIENT_ID: optionalSecret,
+    STRAVA_CLIENT_SECRET: optionalSecret,
+    STRAVA_WEBHOOK_VERIFY_TOKEN: optionalSecret,
+    GOOGLE_CLIENT_ID: optionalSecret,
+    GOOGLE_CLIENT_SECRET: optionalSecret,
+    TOKEN_ENCRYPTION_KEY: optionalSecret,
+    TERRA_API_KEY: optionalSecret,
+    TERRA_DEV_ID: optionalSecret,
+    TERRA_SIGNING_SECRET: optionalSecret,
+    OPENAI_API_KEY: optionalSecret,
+  })
+  .superRefine((value, ctx) => {
+    // Production runs the Telegram webhook (ADR-012), which needs a public URL and a secret.
+    if (value.NODE_ENV !== "production") return;
+    if (!value.APP_URL) {
+      ctx.addIssue({ code: "custom", path: ["APP_URL"], message: "required in production" });
+    }
+    if (!value.TELEGRAM_WEBHOOK_SECRET) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["TELEGRAM_WEBHOOK_SECRET"],
+        message: "required in production",
+      });
+    }
+  });
 
 export type Env = z.infer<typeof envSchema>;
 
 export function parseEnv(source: Record<string, string | undefined>): Env {
-  return envSchema.parse(source);
+  // .env.example documents empty values as `KEY=`; treat those as unset.
+  const cleaned = Object.fromEntries(Object.entries(source).filter(([, value]) => value !== ""));
+  return envSchema.parse(cleaned);
 }
 
 export const env = parseEnv(process.env);

@@ -28,18 +28,18 @@ Concrete, sequential implementation checklist. Supersedes `spec.md` §13's phase
 
 **Goal:** Same as spec.md §13 Phase 1, with the corrections baked in from the start.
 
-- [ ] Neon schema: `conversations` (using ADR-003's `jsonb content`), `llm_usage`
-- [ ] `src/config/env.ts` — zod-validated env, exports `MODELS` (ADR-001) and re-exports `pricing.ts` (ADR-008)
-- [ ] `src/agent/claude.ts` — single wrapper for all Claude calls: budget check → call → usage logging. No other file calls `client.messages.create` directly.
-- [ ] `src/agent/budget.ts` — cost tracking + the graduated enforcement from spec.md §8.3, using the pricing table from ADR-008
-- [ ] `src/bot/setup.ts` — grammy init; **long-polling in dev, webhook in prod** (env-flag switch, no tunnel needed for local Telegram testing)
-- [ ] Telegram access-control middleware (ADR-006) — wired in before any command handler
-- [ ] Telegram webhook authenticated with `secret_token` / `X-Telegram-Bot-Api-Secret-Token`, bot token never in the URL (ADR-012)
-- [ ] `pino` secret redaction configured (ADR-013) — first phase that handles API keys
-- [ ] `DISABLE_THINKING` kill switch in `env.ts` + wrapper (ADR-005); re-derive spec.md §8.4's monthly estimate with thinking tokens included
-- [ ] Basic system prompt: static training-principles block only (no dynamic context yet — that's Phase 2+), structured per ADR-004 even though there's nothing dynamic to append yet
-- [ ] `/start`, `/budget` commands
-- [ ] Deploy to Railway, `setWebhook` call runs automatically on boot in prod mode
+- [x] Neon schema: `conversations` (using ADR-003's `jsonb content`), `llm_usage` (plus cache-token columns, see ADR-008 notes) — migration `drizzle/0000_*`, applied on boot
+- [x] `src/config/env.ts` — zod-validated env, exports `MODELS` (ADR-001). `PRICING` lives in `pricing.ts` and is imported from there, not re-exported (circular import — see ADR-008 notes)
+- [x] `src/agent/claude.ts` — single wrapper for all Claude calls: budget check → call → usage logging. No other file calls `client.messages.create` directly.
+- [x] `src/agent/budget.ts` — cost tracking + the graduated enforcement from spec.md §8.3, using the pricing table from ADR-008 (threshold alerts fire once, on the call that crosses them)
+- [x] `src/bot/setup.ts` — grammy init; **long-polling in dev, webhook in prod** (`NODE_ENV` switch, no tunnel needed for local Telegram testing)
+- [x] Telegram access-control middleware (ADR-006) — wired in before any command handler
+- [x] Telegram webhook authenticated with `secret_token` / `X-Telegram-Bot-Api-Secret-Token`, bot token never in the URL (ADR-012) — checked in Fastify's `onRequest`, before body parsing
+- [x] `pino` secret redaction configured (ADR-013) — redact paths + known secret values scrubbed from error messages/stacks
+- [x] `DISABLE_THINKING` kill switch in `env.ts` + wrapper (ADR-005); spec.md §8.4's monthly estimate re-derived in ADR-005
+- [x] Basic system prompt: static training-principles block only (no dynamic context yet — that's Phase 2+), structured per ADR-004 even though there's nothing dynamic to append yet
+- [x] `/start`, `/budget` commands
+- [ ] Deploy to Railway, `setWebhook` call runs automatically on boot in prod mode (code done; needs the Railway variables and a push to `main`)
 
 **Acceptance:** Message the bot from the authorized chat, get a Claude-generated reply, see a row land in `llm_usage` with the correct model/cost. Message from any other chat produces no reply. `response.usage.cache_read_input_tokens` is non-zero on the second message in a session (verifies ADR-004's caching actually works before more prompt content gets added on top of it).
 

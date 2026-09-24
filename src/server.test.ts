@@ -1,9 +1,10 @@
+import { pino } from "pino";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "./server.js";
 
 describe("GET /health", () => {
   it("responds with ok", async () => {
-    const app = buildServer({ logLevel: "silent" });
+    const app = buildServer({ logger: pino({ level: "silent" }) });
 
     const response = await app.inject({ method: "GET", url: "/health" });
 

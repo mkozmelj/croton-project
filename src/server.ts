@@ -1,11 +1,11 @@
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
 
 type ServerOptions = {
-  logLevel: string;
+  logger: FastifyBaseLogger;
 };
 
-export function buildServer({ logLevel }: ServerOptions): FastifyInstance {
-  const app = Fastify({ logger: { level: logLevel } });
+export function buildServer({ logger }: ServerOptions): FastifyInstance {
+  const app = Fastify({ loggerInstance: logger });
 
   app.get("/health", async () => ({ status: "ok" }));
 
