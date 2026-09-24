@@ -244,3 +244,40 @@ goals
 - **Logs:** `pino` redaction (stack doc §5) is configured in Phase 1, the first phase that handles secrets — not deferred to Phase 5.
 - **If a secret is ever committed:** rotate it at the provider first, then clean history. Removing the file in a later commit doesn't un-leak it.
 - The GitHub repo stays **private**.
+
+---
+
+## ADR-014: Literature corpus — sourcing and ingestion
+
+**Problem:** spec.md Appendix B lists the core books as "Requires digital copy" and §5.3 assumes they can be dropped into `data/literature/` as files. A retailer check (2026-09-24) found that no DRM-free EPUB exists for any of them:
+
+| Book | Publisher | Legal ebook editions found |
+|---|---|---|
+| Friel, *The Triathlete's Training Bible* (5th ed.) | VeloPress | Kindle; ebooks.com (Adobe DRM); B&N; OverDrive lending |
+| Friel, *Your First Triathlon* (2nd ed., owned on Kindle) | VeloPress | Kindle; Kobo EPUB; OverDrive |
+| Daniels, *Daniels' Running Formula* (4th ed.) | Human Kinetics | Publisher direct = VitalSource online access only (no file); Kobo EPUB with Adobe DRM |
+| Bompa, *Periodization* (6th ed.) | Human Kinetics | VitalSource online access only |
+| Fitzgerald & Warden, *80/20 Triathlon* | Hachette | Kindle; Kobo; Google Play; OverDrive (DRM status not confirmed, almost certainly DRM) |
+| House, Johnston & Jornet, *Training for the Uphill Athlete* | Patagonia | Kobo EPUB with Adobe DRM; Kindle; Everand |
+| Allen, Coggan & McGregor, *Training and Racing with a Power Meter* (3rd ed.) | VeloPress | Kobo; Google Play; ebooks.com (DRM status not confirmed); distributor sells print only |
+
+Removing DRM is prohibited in the EU even for owned copies (InfoSoc Directive Art. 6), and the private-copy exception does not cover copies made from unlawful sources (CJEU C-435/12, *ACI Adam*, 2014). So "buy the ebook and ingest it" does not work, and pirated copies are out.
+
+**Decision:**
+
+- **Allowed sources, in order of priority:**
+  1. **Open corpus first.** This includes open-access papers (Seiler 2010 IJSPP, Stöggl & Sperlich 2014, Gabbett 2016 BJSM, Impellizzeri et al. 2020, Bosquet et al. 2007, Plews et al. 2013) and public articles from Uphill Athlete, TrainingPeaks, Joe Friel, Matt Fitzgerald and Scientific Triathlon, for personal use only. Phase 4 is built and validated on this corpus alone.
+  2. **Print copies scanned by the athlete** (private copy of a lawfully owned book; no DRM involved). Planned for *Triathlete's Training Bible* and *Daniels' Running Formula* once the pipeline is proven, and optionally *Uphill Athlete*.
+  3. **Publisher-permitted export**, i.e. the VitalSource print feature within its per-book limit, for selected chapters.
+  4. **Kindle highlights (read.amazon.com/notebook) and the athlete's own chapter notes.** This applies to *Your First Triathlon*, which is a beginner book and low priority for this athlete.
+  - **Never:** DRM-stripped files, shadow-library downloads, or bulk screenshotting of protected ebooks.
+- **Two layers, not just RAG.** Books improve plans mainly through the always-in-context principles block (ADR-004), because `plan_generation` doesn't retrieve by default. Each ingested book gets an offline distillation pass: Claude summarizes each chapter into rules, numbers and applicability conditions, and those notes are hand-merged into `STATIC_SYSTEM_PROMPT`. Chunks go to RAG for specifics. `search_literature` is exposed to `plan_generation` as well as `knowledge_qa`.
+- **Source files never enter git.** `data/literature/` is git-ignored; the only copy in the system is `literature_chunks` in Neon.
+- **Ingestion is a CLI script** (`npm run ingest -- <file>`), never runtime:
+  - extract → normalize to Markdown (EPUB/HTML via parser, text PDFs via `pdftotext`, scans via OCR + a cleanup pass for hyphenation, running headers and page numbers)
+  - heading-aware chunks of ~500–800 tokens with ~10% overlap, each prefixed with `Source — Chapter — Section` before embedding
+  - embed in batches and log to `api_usage` with `call_type: 'embedding'`
+  - upsert keyed on `(source, content_hash)` so re-runs are idempotent (ADR-009 style)
+- **Schema change from spec.md §4.1** — `literature_chunks` gains `section`, `locator` (page or location, for citations), `source_type` (`paper` | `article` | `book_scan` | `notes`), `content_hash`, unique `(source, content_hash)`. The embedding is stored as `real[]`; pgvector isn't needed while search stays in memory.
+- **Retrieval eval.** A fixture of 15–20 questions with the expected source; top-5 recall is checked whenever chunking changes.
+- **Open question, decide before Phase 4 starts:** the embedding provider. The candidates are OpenAI `text-embedding-3-small` (spec default, adds a second vendor) and Voyage AI (Anthropic's recommended embeddings partner). Cost is negligible either way at this corpus size.

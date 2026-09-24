@@ -89,16 +89,22 @@ Concrete, sequential implementation checklist. Supersedes `spec.md` §13's phase
 
 ## Phase 4: Intelligence
 
-**Goal:** Same as spec.md §13 Phase 4 — no corrections needed here, spec.md's design holds up.
+**Goal:** Same as spec.md §13 Phase 4, with corpus sourcing and ingestion per ADR-014. The books have no DRM-free ebook editions, so the pipeline is built and validated on the open corpus first, and scanned books are added afterwards.
 
-- [ ] Literature chunking + embedding pipeline (OpenAI `text-embedding-3-small`)
+- [ ] Decide embedding provider (OpenAI vs Voyage) — ADR-014 open question
+- [ ] `literature_chunks` schema per ADR-014 (`section`, `locator`, `source_type`, `content_hash`, unique `(source, content_hash)`, `real[]` embedding) + migration
+- [ ] `npm run ingest -- <file>` CLI: extract (EPUB/HTML, text PDF, OCR'd scan) → Markdown cleanup → heading-aware chunks with context prefix → batched embeddings logged to `api_usage` → upsert
+- [ ] Ingest the open corpus: the six open-access papers listed in ADR-014 plus selected Uphill Athlete / TrainingPeaks / Friel / Fitzgerald articles
+- [ ] Retrieval eval fixture (15–20 questions → expected source, top-5 recall), run in Vitest against a small fixture corpus
 - [ ] In-memory vector search, loaded at startup
+- [ ] `search_literature` tool, wired into the tool set with a prescriptive description (per `01-stack-and-principles.md` §6 — "call this when the athlete asks a specific training-science question not covered by the core principles," not just "searches literature"); exposed to `plan_generation` as well as `knowledge_qa`
+- [ ] Book distillation pass: chapter notes → hand-merged updates to `STATIC_SYSTEM_PROMPT` (re-verify cache hits afterwards)
+- [ ] Ingest scanned books (*Triathlete's Training Bible*, *Daniels' Running Formula*) once the athlete has scanned them — not a blocker for Phase 4 acceptance
 - [ ] Import TrainingPeaks 2024 data
-- [ ] `search_literature` tool, wired into the tool set with a prescriptive description (per `01-stack-and-principles.md` §6 — "call this when the athlete asks a specific training-science question not covered by the core principles," not just "searches literature")
 
-**Acceptance:** Ask a specific training-science question not covered by the core system prompt principles; verify the agent calls `search_literature` and the answer cites something from the ingested corpus.
+**Acceptance:** Ask a specific training-science question not covered by the core system prompt principles; verify the agent calls `search_literature` and the answer cites something from the ingested corpus (source + locator). The retrieval eval passes. Re-running ingest on the same file creates no duplicate rows.
 
-**Manual steps needed:** spec.md §12.1 #7, §12.2 #14.
+**Manual steps needed:** spec.md §12.1 #7 (or a Voyage key, depending on the provider decision), §12.2 #14. Plus, from ADR-014: buy print copies of *Triathlete's Training Bible* (5th ed.) and *Daniels' Running Formula* (4th ed.), scan them with an OCR scanning app (~1h per book) into the git-ignored `data/literature/`, and export Kindle highlights for *Your First Triathlon*.
 
 ---
 

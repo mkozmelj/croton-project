@@ -16,6 +16,7 @@ Personal AI training coach for a single amateur multi-sport athlete. Telegram bo
 - **Secrets never enter git** — only `.env` (ignored) and Railway variables. Before every commit, check staged files for `.env`, tokens, passwords in connection strings, real chat IDs or health values. ADR-013.
 - **OAuth tokens live encrypted in the `oauth_tokens` table**, never env vars; OAuth flows use a single-use `state`. ADR-011.
 - **Every webhook is authenticated before it's parsed** (Telegram secret header, Strava verify token + subscription/owner check, Terra HMAC), timing-safe compare, reject path tested. ADR-012.
+- **Literature corpus is open sources, athlete-scanned print copies, or notes only** — never DRM-stripped or pirated files. Source files stay in git-ignored `data/literature/`. ADR-014.
 - **`npm run check` (Biome + `tsc --noEmit` + Vitest) must pass before any commit touching `src/`.**
 
 ## Stack
