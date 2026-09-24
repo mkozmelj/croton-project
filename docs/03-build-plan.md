@@ -60,7 +60,7 @@ Concrete, sequential implementation checklist. Supersedes `spec.md` §13's phase
 - [x] Activity-summary flow (Haiku, no thinking per ADR-005) → Telegram notification — summarized once per new activity, plain-text fallback when over budget
 - [x] `/status` command
 - [x] Dynamic context block now gets appended to the system prompt (ADR-004's second array element) — re-verify caching still hits on the static portion after this change. **Verified 2026-09-24:** call 1 `cache_creation_input_tokens: 2298`, call 2 `cache_read_input_tokens: 2298`, with a fresh context block (~300 tokens) on each call.
-- [ ] Deploy + connect: set `TOKEN_ENCRYPTION_KEY` in Railway, deploy, `/connect` from Telegram, `npm run strava:subscribe -- create <APP_URL>`, set `STRAVA_SUBSCRIPTION_ID`, redeploy; Intervals.icu: connect Garmin with "Download wellness data" on, set `INTERVALS_API_KEY` + `INTERVALS_ATHLETE_ID`
+- [x] Deploy + connect (done 2026-09-24): set `TOKEN_ENCRYPTION_KEY` in Railway, deploy, `/connect` from Telegram, `npm run strava:subscribe -- create <APP_URL>`, set `STRAVA_SUBSCRIPTION_ID`, redeploy; Intervals.icu: connect Garmin with "Download wellness data" on, set `INTERVALS_API_KEY` + `INTERVALS_ATHLETE_ID`
 
 **Acceptance:** A real Strava activity (or a simulated webhook payload in a test) produces a Telegram summary within seconds and a correctly-upserted DB row. Health metrics from Intervals.icu populate `health_metrics` without duplicate rows when the same days are synced again.
 

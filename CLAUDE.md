@@ -29,6 +29,6 @@ One module, one responsibility — no file both queries the DB and formats Teleg
 
 ## Current status
 
-Phase 0 done: private repo `mkozmelj/croton-project`, deployed on Railway at `https://croton-project-production.up.railway.app` (`/health` responds). Phase 1 done (bot + Claude wrapper + budget, deployed; prod webhook answers). Phase 2 code complete (Strava OAuth + webhook via REST, Intervals.icu wellness sync (ADR-015), full schema, activity summaries, `/status`, dynamic context); remaining: deploy, connect Strava, create the webhook subscription, and set the Intervals.icu API key. Use Node 24 (`nvm use`, reads `.nvmrc`).
+Phase 0 done: private repo `mkozmelj/croton-project`, deployed on Railway at `https://croton-project-production.up.railway.app` (`/health` responds). Phase 1 done (bot + Claude wrapper + budget, deployed; prod webhook answers). Phase 2 done (Strava OAuth + webhook via REST, Intervals.icu wellness sync (ADR-015), full schema, activity summaries, `/status`, dynamic context; deployed, Strava connected with a webhook subscription, Intervals.icu syncing). Next: Phase 3, starting with the ADR-016 fitness baseline. Use Node 24 (`nvm use`, reads `.nvmrc`).
 
 Local dev (`npm run dev`, `NODE_ENV=development`) uses Telegram long polling, and grammy **deletes the registered webhook** when polling starts — so running dev with the prod bot token silently disconnects production until the next deploy. Use a separate dev bot from BotFather for local work.
