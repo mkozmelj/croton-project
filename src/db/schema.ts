@@ -14,6 +14,9 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import type { Background } from "../training/background.js";
+import { MARKER_METRICS, MARKER_SOURCES, MARKER_SPORTS } from "../training/markers.js";
+import type { SportZones } from "../training/zones.js";
 
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 // Upserts set `updated_at` explicitly; $onUpdate covers plain updates.
@@ -135,25 +138,26 @@ export const healthMetrics = pgTable("health_metrics", {
   bodyFatPct: decimal("body_fat_pct"),
   muscleMassKg: decimal("muscle_mass_kg"),
   bmi: decimal("bmi"),
+  // ADR-016: Intervals.icu's fitness (CTL), fatigue (ATL) and ramp rate, from the same record.
+  ctl: decimal("ctl"),
+  atl: decimal("atl"),
+  rampRate: decimal("ramp_rate"),
   rawData: jsonb("raw_data").$type<Record<string, unknown>>().notNull().default({}),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
 
-export type ZoneRange = [low: number, high: number];
-export type SportZones = Partial<Record<string, Record<string, ZoneRange>>>;
-
 // Single-row table (id is always 1). No `race_calendar` (replaced by events/goals, ADR-010)
 // and no `current_phase`: the phase is derived from weeks to the A event, never stored.
+// Thresholds (FTP, VDOT, CSS, ...) live in `fitness_markers` (ADR-016); `sport_zones` is the
+// snapshot derived from them, rewritten whenever a marker changes.
 export const athleteProfile = pgTable(
   "athlete_profile",
   {
     id: integer("id").primaryKey().default(1),
     name: text("name"),
     sportZones: jsonb("sport_zones").$type<SportZones>(),
-    vdot: decimal("vdot"),
-    ftp: decimal("ftp"),
-    css: decimal("css"),
+    background: jsonb("background").$type<Background>(),
     injuryNotes: text("injury_notes"),
     preferences: jsonb("preferences").$type<Record<string, unknown>>(),
     createdAt: createdAt(),
@@ -211,3 +215,68 @@ export const goals = pgTable(
     ),
   ],
 );
+
+// ADR-016: dated threshold history. The current value is the latest row per (sport, metric).
+export const fitnessMarkers = pgTable(
+  "fitness_markers",
+  {
+    id: serial("id").primaryKey(),
+    sport: text("sport", { enum: MARKER_SPORTS }).notNull(),
+    metric: text("metric", { enum: MARKER_METRICS }).notNull(),
+    value: decimal("value").notNull(),
+    measuredOn: date("measured_on", { mode: "string" }).notNull(),
+    source: text("source", { enum: MARKER_SOURCES }).notNull(),
+    sourceRef: text("source_ref"),
+    notes: text("notes"),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    // ADR-009 upsert target.
+    uniqueIndex("fitness_markers_sport_metric_day_source").on(
+      table.sport,
+      table.metric,
+      table.measuredOn,
+      table.source,
+    ),
+  ],
+);
+
+export const PENDING_ACTION_TYPES = [
+  // Confirmations: written only after the athlete taps Confirm.
+  "set_goal",
+  "update_profile",
+  "add_fitness_marker",
+  "apply_plan",
+  // Conversation modes.
+  "recap",
+  "onboarding",
+] as const;
+
+// ADR-007: state that must survive a restart. Two kinds share the table: confirmations
+// (answered with a button, `payload` is what gets written) and conversation modes
+// (`recap`, `onboarding`: they change how the next message is handled).
+export const pendingActions = pgTable(
+  "pending_actions",
+  {
+    id: serial("id").primaryKey(),
+    chatId: bigint("chat_id", { mode: "number" }).notNull(),
+    actionType: text("action_type", { enum: PENDING_ACTION_TYPES }).notNull(),
+    payload: jsonb("payload").$type<unknown>().notNull(),
+    createdAt: createdAt(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [index("pending_actions_chat_idx").on(table.chatId, table.actionType)],
+);
+
+// One confirmed plan per training week (spec.md §4.1/§4.2). `plan` is validated with
+// weekPlanSchema (src/training/plan.ts) when read; workouts carry their calendar event ids.
+export const trainingPlans = pgTable("training_plans", {
+  id: serial("id").primaryKey(),
+  weekStart: date("week_start", { mode: "string" }).notNull().unique(),
+  phase: text("phase"),
+  plan: jsonb("plan").$type<unknown>().notNull(),
+  recapNotes: text("recap_notes"),
+  agentAnalysis: text("agent_analysis"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});

@@ -13,6 +13,9 @@ describe("healthUpdateFromWellness", () => {
       stress: 24.4,
       weight: 70.2,
       bodyFat: 15.1,
+      ctl: 40.5,
+      atl: 45.2,
+      rampRate: -1.5,
     });
     expect(update).toMatchObject({
       date: "2026-09-24",
@@ -26,6 +29,9 @@ describe("healthUpdateFromWellness", () => {
         weightKg: 70.2,
         bodyFatPct: 15.1,
         bodyBattery: undefined,
+        ctl: 40.5,
+        atl: 45.2,
+        rampRate: -1.5,
       },
     });
   });
@@ -42,7 +48,7 @@ describe("healthUpdateFromWellness", () => {
   });
 
   it("recognizes a record with nothing to store", () => {
-    const update = healthUpdateFromWellness({ id: "2026-09-24", ctl: 40, atl: 45 });
+    const update = healthUpdateFromWellness({ id: "2026-09-24", updated: "2026-09-24T06:00:00Z" });
     expect(hasHealthValues(update)).toBe(false);
   });
 });

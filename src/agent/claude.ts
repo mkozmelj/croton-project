@@ -1,8 +1,11 @@
 import type {
+  JSONOutputFormat,
   Message,
   MessageCreateParamsNonStreaming,
   MessageParam,
   OutputConfig,
+  Tool,
+  ToolChoice,
 } from "@anthropic-ai/sdk/resources/messages/messages";
 import type { Logger } from "pino";
 import { MODELS, type ModelId } from "../config/env.js";
@@ -63,6 +66,12 @@ export type ClaudeRequest = {
   callType: CallType;
   messages: MessageParam[];
   dynamicContext?: string;
+  // Rendered before the system prompt, so part of the cached prefix: pass a fixed list.
+  tools?: Tool[];
+  // `auto` or `none` only: forced tool choice doesn't combine with thinking.
+  toolChoice?: Extract<ToolChoice, { type: "auto" | "none" }>;
+  // Structured output (stack doc §6): the reply's text block is JSON matching the schema.
+  outputFormat?: JSONOutputFormat;
 };
 
 export type ClaudeResult = {
@@ -94,15 +103,21 @@ export function createClaude(deps: ClaudeDeps): Claude {
       system: buildSystemPrompt(request.dynamicContext),
       messages: request.messages,
     };
-    if (model !== MODELS.sonnet) return params;
+    if (request.tools) params.tools = request.tools;
+    if (request.toolChoice) params.tool_choice = request.toolChoice;
+    const outputConfig: OutputConfig = {};
+    if (request.outputFormat) outputConfig.format = request.outputFormat;
 
     // Sonnet 5 thinks adaptively when `thinking` is omitted, so "off" must be explicit.
-    if (deps.disableThinking || !policy.effort) {
-      params.thinking = { type: "disabled" };
-    } else {
-      params.thinking = { type: "adaptive" };
-      params.output_config = { effort: policy.effort };
+    if (model === MODELS.sonnet) {
+      if (deps.disableThinking || !policy.effort) {
+        params.thinking = { type: "disabled" };
+      } else {
+        params.thinking = { type: "adaptive" };
+        outputConfig.effort = policy.effort;
+      }
     }
+    if (Object.keys(outputConfig).length > 0) params.output_config = outputConfig;
     return params;
   }
 

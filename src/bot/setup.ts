@@ -1,5 +1,6 @@
 import type { Bot } from "grammy";
 import type { Logger } from "pino";
+import type { ActionExecutor } from "../agent/action-executor.js";
 import type { Orchestrator } from "../agent/orchestrator.js";
 import { authorizedChatOnly } from "./access-control.js";
 import { COMMANDS, type CommandDeps, registerCommands } from "./commands.js";
@@ -10,8 +11,12 @@ export const TELEGRAM_WEBHOOK_PATH = "/webhook/telegram";
 type BotDeps = CommandDeps & {
   authorizedChatId: number;
   orchestrator: Orchestrator;
+  executor: ActionExecutor;
   logger: Logger;
 };
+
+// Messages, plus the Confirm/Cancel button taps (ADR-007).
+const ALLOWED_UPDATES = ["message", "callback_query"] as const;
 
 // Middleware order matters: error boundary, then access control (ADR-006) before any handler.
 export function configureBot(bot: Bot, deps: BotDeps): Bot {
@@ -45,7 +50,7 @@ export async function startBot(bot: Bot, { transport, authorizedChatId, logger }
     const url = new URL(TELEGRAM_WEBHOOK_PATH, transport.appUrl).toString();
     await bot.api.setWebhook(url, {
       secret_token: transport.secretToken,
-      allowed_updates: ["message"],
+      allowed_updates: ALLOWED_UPDATES,
     });
     log.info({ url }, "telegram webhook registered");
     return;
@@ -54,7 +59,7 @@ export async function startBot(bot: Bot, { transport, authorizedChatId, logger }
   // bot.start() deletes any registered webhook first, then polls until bot.stop().
   void bot
     .start({
-      allowed_updates: ["message"],
+      allowed_updates: ALLOWED_UPDATES,
       onStart: (info) => log.info({ username: info.username }, "telegram long polling started"),
     })
     .catch((error: unknown) => log.fatal({ err: error }, "telegram long polling stopped"));

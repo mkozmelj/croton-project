@@ -1,13 +1,21 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { Bot } from "grammy";
+import { createActionExecutor } from "./agent/action-executor.js";
 import { createActivitySummarizer } from "./agent/activity-summary.js";
+import { createCalendarContext } from "./agent/calendar-context.js";
 import { createClaude } from "./agent/claude.js";
 import { createContextBuilder } from "./agent/context.js";
+import { createFieldTestProposer } from "./agent/field-test-proposals.js";
+import { createFitnessService } from "./agent/fitness.js";
 import { createOrchestrator } from "./agent/orchestrator.js";
-import type { StravaConnectDeps } from "./bot/commands.js";
+import { createPlanBooking } from "./agent/plan-booking.js";
+import { createPlanner } from "./agent/planner.js";
+import { createToolHandlers } from "./agent/tool-handlers.js";
+import type { ConnectDeps } from "./bot/commands.js";
 import {
   activityFailureText,
   budgetAlertText,
+  googleConnectedText,
   jobFailureText,
   jobRecoveredText,
   serverFailureText,
@@ -22,14 +30,26 @@ import { createActivityStore } from "./db/activities.js";
 import { createAthleteProfileStore } from "./db/athlete-profile.js";
 import { createDatabase, runMigrations } from "./db/client.js";
 import { createConversationStore } from "./db/conversations.js";
+import { createFitnessMarkerStore } from "./db/fitness-markers.js";
+import { createGoalStore } from "./db/goals.js";
 import { createHealthMetricsStore } from "./db/health-metrics.js";
 import { createUsageStore } from "./db/llm-usage.js";
 import { createOAuthStateStore } from "./db/oauth-states.js";
-import { createOAuthTokenStore } from "./db/oauth-tokens.js";
+import { createOAuthTokenStore, type OAuthProvider } from "./db/oauth-tokens.js";
+import { createPendingActionStore } from "./db/pending-actions.js";
+import { createTrainingPlanStore } from "./db/training-plans.js";
+import {
+  GOOGLE_AUTH_CALLBACK_PATH,
+  GOOGLE_AUTH_START_PATH,
+  registerGoogleAuthRoutes,
+} from "./integrations/google/auth-routes.js";
+import { type CalendarClient, createCalendarClient } from "./integrations/google/calendar.js";
+import { createGoogleAuth } from "./integrations/google/oauth.js";
 import {
   createIntervalsClient,
   intervalsBasicCredentials,
 } from "./integrations/intervals/client.js";
+import { createProfileSync } from "./integrations/intervals/profile-sync.js";
 import { createWellnessSync } from "./integrations/intervals/wellness-sync.js";
 import { createTokenCipher } from "./integrations/oauth-crypto.js";
 import { createStravaActivitySync } from "./integrations/strava/activity-sync.js";
@@ -56,6 +76,7 @@ const logger = createLogger({
       env.TELEGRAM_WEBHOOK_SECRET,
       env.STRAVA_CLIENT_SECRET,
       env.STRAVA_WEBHOOK_VERIFY_TOKEN,
+      env.GOOGLE_CLIENT_SECRET,
       env.TOKEN_ENCRYPTION_KEY,
       env.INTERVALS_API_KEY,
       env.INTERVALS_API_KEY && intervalsBasicCredentials(env.INTERVALS_API_KEY),
@@ -84,12 +105,25 @@ const claude = createClaude({
     notifier.notify(budgetAlertText(level, spendEur, env.MONTHLY_LLM_BUDGET_EUR)),
 });
 
+const chatId = env.TELEGRAM_AUTHORIZED_CHAT_ID;
 const activities = createActivityStore(db);
 const health = createHealthMetricsStore(db);
+const profile = createAthleteProfileStore(db);
+const markers = createFitnessMarkerStore(db);
+const fitness = createFitnessService({ markers, profile });
+const goals = createGoalStore(db);
+const plans = createTrainingPlanStore(db);
+const pending = createPendingActionStore(db);
+const conversations = createConversationStore(db);
 const context = createContextBuilder({
-  profile: createAthleteProfileStore(db),
+  profile,
   activities,
   health,
+  fitness,
+  goals,
+  plans,
+  pending,
+  chatId,
   timeZone: env.TIMEZONE,
 });
 const tasks = createBackgroundTasks({
@@ -112,10 +146,54 @@ if (transport.mode === "webhook") {
   registerTelegramWebhook(app, { bot, secretToken: transport.secretToken });
 }
 
-let stravaConnect: StravaConnectDeps | undefined;
-if (env.STRAVA_CLIENT_ID && env.STRAVA_CLIENT_SECRET && env.TOKEN_ENCRYPTION_KEY) {
-  const tokens = createOAuthTokenStore(db, createTokenCipher(env.TOKEN_ENCRYPTION_KEY));
-  const states = createOAuthStateStore(db);
+const connect: Partial<Record<OAuthProvider, ConnectDeps>> = {};
+const tokens = env.TOKEN_ENCRYPTION_KEY
+  ? createOAuthTokenStore(db, createTokenCipher(env.TOKEN_ENCRYPTION_KEY))
+  : undefined;
+const states = createOAuthStateStore(db);
+
+// Google Calendar (ADR-002: REST). Without it, confirmed plans are saved but not booked.
+let calendarClient: CalendarClient | null = null;
+if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && tokens) {
+  const googleAuth = createGoogleAuth({
+    clientId: env.GOOGLE_CLIENT_ID,
+    clientSecret: env.GOOGLE_CLIENT_SECRET,
+    redirectUri: new URL(GOOGLE_AUTH_CALLBACK_PATH, publicUrl).toString(),
+    tokens,
+  });
+  registerGoogleAuthRoutes(app, {
+    auth: googleAuth,
+    states,
+    onConnected: () => notifier.notify(googleConnectedText()),
+  });
+  connect.google = {
+    states,
+    startUrl: new URL(GOOGLE_AUTH_START_PATH, publicUrl).toString(),
+    isConnected: () => googleAuth.isConnected(),
+  };
+  calendarClient = createCalendarClient({ auth: googleAuth });
+} else {
+  logger.info(
+    { module: "google" },
+    "Google Calendar disabled (client id/secret or TOKEN_ENCRYPTION_KEY unset)",
+  );
+}
+const calendar = async () =>
+  calendarClient && (await connect.google?.isConnected()) ? calendarClient : null;
+
+const planner = createPlanner({
+  claude,
+  context,
+  conversations,
+  pending,
+  calendar: createCalendarContext({ calendar, timeZone: env.TIMEZONE, logger }),
+  chatId,
+  timeZone: env.TIMEZONE,
+  logger,
+});
+const fieldTests = createFieldTestProposer({ plans, pending, chatId, timeZone: env.TIMEZONE });
+
+if (env.STRAVA_CLIENT_ID && env.STRAVA_CLIENT_SECRET && tokens) {
   const auth = createStravaAuth({
     clientId: env.STRAVA_CLIENT_ID,
     clientSecret: env.STRAVA_CLIENT_SECRET,
@@ -127,7 +205,7 @@ if (env.STRAVA_CLIENT_ID && env.STRAVA_CLIENT_SECRET && env.TOKEN_ENCRYPTION_KEY
     states,
     onConnected: () => notifier.notify(stravaConnectedText()),
   });
-  stravaConnect = {
+  connect.strava = {
     states,
     startUrl: new URL(STRAVA_AUTH_START_PATH, publicUrl).toString(),
     isConnected: async () => (await auth.athleteId()) !== null,
@@ -139,7 +217,11 @@ if (env.STRAVA_CLIENT_ID && env.STRAVA_CLIENT_SECRET && env.TOKEN_ENCRYPTION_KEY
       client: createStravaClient({ auth }),
       activities,
       tokens,
-      onNewActivity: async (activity) => notifier.notify(await summarizer.summarize(activity)),
+      onNewActivity: async (activity) => {
+        await notifier.notify(await summarizer.summarize(activity));
+        // ADR-016: a completed field test proposes its markers.
+        for (const proposal of await fieldTests.propose(activity)) await notifier.propose(proposal);
+      },
       onDeauthorized: () => notifier.notify(stravaRevokedText()),
       logger,
     });
@@ -166,11 +248,12 @@ if (env.STRAVA_CLIENT_ID && env.STRAVA_CLIENT_SECRET && env.TOKEN_ENCRYPTION_KEY
 
 const jobs: Job[] = [];
 if (env.INTERVALS_API_KEY && env.INTERVALS_ATHLETE_ID) {
+  const intervalsClient = createIntervalsClient({
+    apiKey: env.INTERVALS_API_KEY,
+    athleteId: env.INTERVALS_ATHLETE_ID,
+  });
   const wellness = createWellnessSync({
-    client: createIntervalsClient({
-      apiKey: env.INTERVALS_API_KEY,
-      athleteId: env.INTERVALS_ATHLETE_ID,
-    }),
+    client: intervalsClient,
     health,
     timeZone: env.TIMEZONE,
     logger,
@@ -184,21 +267,69 @@ if (env.INTERVALS_API_KEY && env.INTERVALS_ATHLETE_ID) {
       await wellness.syncRecent();
     },
   });
+  const profileSync = createProfileSync({
+    client: intervalsClient,
+    markers,
+    fitness,
+    timeZone: env.TIMEZONE,
+    logger,
+  });
+  // ADR-016: thresholds change rarely; once a day early in the morning, plus on boot.
+  jobs.push({
+    name: "intervals-profile",
+    cron: "30 5 * * *",
+    runOnStart: true,
+    run: async () => {
+      await profileSync.sync();
+    },
+  });
 } else {
   logger.info({ module: "intervals" }, "Intervals.icu disabled (API key or athlete id unset)");
 }
 
+// spec.md §6.4: Sunday 19:00 local time, in the IANA zone (never a fixed "CET" offset).
+jobs.push({
+  name: "sunday-recap",
+  cron: "0 19 * * 0",
+  run: async () => {
+    await notifier.notify(await planner.startRecap());
+  },
+});
+
+const orchestrator = createOrchestrator({
+  claude,
+  conversations,
+  context,
+  tools: createToolHandlers({ pending, goals, plans }),
+  pending,
+  planner,
+  chatId,
+  timeZone: env.TIMEZONE,
+  logger,
+});
+
 configureBot(bot, {
-  authorizedChatId: env.TELEGRAM_AUTHORIZED_CHAT_ID,
-  orchestrator: createOrchestrator({
-    claude,
-    conversations: createConversationStore(db),
-    context,
+  authorizedChatId: chatId,
+  orchestrator,
+  executor: createActionExecutor({
+    pending,
+    goals,
+    profile,
+    fitness,
+    booking: createPlanBooking({ plans, calendar, timeZone: env.TIMEZONE }),
+    timeZone: env.TIMEZONE,
   }),
   usage,
   activities,
   health,
-  ...(stravaConnect ? { strava: stravaConnect } : {}),
+  profile,
+  fitness,
+  goals,
+  plans,
+  pending,
+  planner,
+  onboarding: orchestrator,
+  connect,
   monthlyBudgetEur: env.MONTHLY_LLM_BUDGET_EUR,
   timeZone: env.TIMEZONE,
   logger,

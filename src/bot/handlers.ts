@@ -1,11 +1,20 @@
-import type { Bot, Context, MiddlewareFn } from "grammy";
+import { type Bot, type Context, InlineKeyboard, type MiddlewareFn } from "grammy";
 import type { Logger } from "pino";
+import type { ActionExecutor } from "../agent/action-executor.js";
+import { describeProposal } from "../agent/actions.js";
 import { BudgetExceededError } from "../agent/budget.js";
 import type { Orchestrator } from "../agent/orchestrator.js";
+import type { Reply } from "../agent/reply.js";
+import type { PendingActionRow } from "../db/pending-actions.js";
+import { GoogleCalendarError } from "../integrations/google/calendar.js";
+import { GoogleAuthError } from "../integrations/google/oauth.js";
 import { budgetRefusalText, failureText, splitMessage } from "./formatting.js";
 
 // Telegram clears the "typing…" indicator after ~5 s; refresh it while Claude works.
 const TYPING_REFRESH_MS = 4_500;
+
+// Callback data of the Confirm/Cancel buttons: `pa:<pending action id>:ok|no`.
+const PROPOSAL_CALLBACK = /^pa:(\d+):(ok|no)$/;
 
 // Catches everything below it: the error is logged and the athlete gets a message
 // instead of silence (stack doc §5). Errors never reach grammy's webhook adapter, which
@@ -24,39 +33,28 @@ export function errorBoundary(logger: Logger): MiddlewareFn<Context> {
   };
 }
 
-export function registerMessageHandlers(
-  bot: Bot,
-  { orchestrator }: { orchestrator: Orchestrator },
-) {
-  bot.on("message:text", async (ctx) => {
-    if (ctx.message.text.startsWith("/")) {
-      await ctx.reply("Unknown command. Try /status or /budget.");
-      return;
-    }
-
-    const stopTyping = keepTyping(ctx);
-    let reply: string;
-    try {
-      reply = await orchestrator.handleMessage({
-        text: ctx.message.text,
-        telegramMessageId: ctx.message.message_id,
-      });
-    } catch (error) {
-      if (!(error instanceof BudgetExceededError)) throw error;
-      reply = budgetRefusalText();
-    } finally {
-      stopTyping();
-    }
-
-    for (const chunk of splitMessage(reply)) await ctx.reply(chunk);
-  });
-
-  bot.on("message", async (ctx) => {
-    await ctx.reply("I can only read text messages for now.");
-  });
+export function proposalKeyboard(id: number): InlineKeyboard {
+  return new InlineKeyboard().text("✅ Confirm", `pa:${id}:ok`).text("✖️ Cancel", `pa:${id}:no`);
 }
 
-function keepTyping(ctx: Context): () => void {
+// The proposal as rendered from its payload, with its buttons on the last chunk.
+export function proposalMessages(row: PendingActionRow) {
+  const chunks = splitMessage(describeProposal(row));
+  return chunks.map((text, index) => ({
+    text,
+    ...(index === chunks.length - 1 ? { reply_markup: proposalKeyboard(row.id) } : {}),
+  }));
+}
+
+export async function replyWithProposals(ctx: Context, reply: Reply): Promise<void> {
+  for (const chunk of splitMessage(reply.text)) await ctx.reply(chunk);
+  for (const proposal of reply.proposals) {
+    for (const { text, ...options } of proposalMessages(proposal)) await ctx.reply(text, options);
+  }
+}
+
+// Runs `work` with the typing indicator on; an over-budget refusal becomes a reply.
+export async function withTyping<T>(ctx: Context, work: () => Promise<T>): Promise<T> {
   const send = () => {
     ctx.replyWithChatAction("typing").catch(() => {
       // Cosmetic only; a failed indicator must not fail the reply.
@@ -64,5 +62,76 @@ function keepTyping(ctx: Context): () => void {
   };
   send();
   const timer = setInterval(send, TYPING_REFRESH_MS);
-  return () => clearInterval(timer);
+  try {
+    return await work();
+  } finally {
+    clearInterval(timer);
+  }
+}
+
+type HandlerDeps = { orchestrator: Orchestrator; executor: ActionExecutor };
+
+export function registerMessageHandlers(bot: Bot, { orchestrator, executor }: HandlerDeps) {
+  bot.on("message:text", async (ctx) => {
+    if (ctx.message.text.startsWith("/")) {
+      await ctx.reply("Unknown command. /start lists them.");
+      return;
+    }
+
+    let reply: Reply;
+    try {
+      reply = await withTyping(ctx, () =>
+        orchestrator.handleMessage({
+          text: ctx.message.text,
+          telegramMessageId: ctx.message.message_id,
+        }),
+      );
+    } catch (error) {
+      if (!(error instanceof BudgetExceededError)) throw error;
+      reply = { text: budgetRefusalText(), proposals: [] };
+    }
+    await replyWithProposals(ctx, reply);
+  });
+
+  // ADR-007: the confirmation step. Everything it needs is in the pending_actions row, so a
+  // button tapped after a restart still works.
+  bot.callbackQuery(PROPOSAL_CALLBACK, async (ctx) => {
+    await ctx.answerCallbackQuery().catch(() => {
+      // Only stops the button's loading spinner.
+    });
+    const chatId = ctx.chat?.id;
+    if (chatId === undefined) return;
+    const id = Number(ctx.match[1]);
+
+    let result: string;
+    try {
+      result =
+        ctx.match[2] === "ok"
+          ? await withTyping(ctx, () => executor.confirm(id, chatId))
+          : await executor.cancel(id, chatId);
+    } catch (error) {
+      // The row was restored: keep the buttons so Confirm can be tapped again.
+      if (error instanceof GoogleAuthError) {
+        await ctx.reply(
+          "Google Calendar access has expired or was revoked. Send /connect calendar, then tap Confirm again.",
+        );
+        return;
+      }
+      if (error instanceof GoogleCalendarError) {
+        await ctx.reply(
+          `Booking failed (${error.message}). Nothing was lost; tap Confirm to retry.`,
+        );
+        return;
+      }
+      throw error;
+    }
+    await ctx.editMessageReplyMarkup().catch(() => {
+      // The message may be too old to edit; the row is consumed either way.
+    });
+    await ctx.reply(result);
+  });
+
+  bot.on("message", async (ctx) => {
+    await ctx.reply("I can only read text messages for now.");
+  });
 }

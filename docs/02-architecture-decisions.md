@@ -50,6 +50,12 @@ ADR-style log of decisions that correct or sharpen `spec.md`. Each entry: the pr
 - **Spike outcome (2026-09-24):**
   - **Strava → REST.** `https://mcp.strava.com/.well-known/oauth-protected-resource` names `https://www.strava.com/mcp-issuer` as its authorization server, with separate `/oauth/mcp/authorize`, `/oauth/mcp/token` and `/oauth/mcp/register_client` (dynamic client registration) endpoints. Using it would mean a second OAuth grant from a second issuer, refreshed separately, on top of the API-app grant the webhook needs anyway (push subscriptions belong to the API app, and ADR-012 re-fetches every activity with its token). Activities are already in the DB, so the agent reads them from there. Not verified: whether the MCP server also accepts an API-app token was not tested, because building a second grant path for it isn't worth it either way.
   - **Google Calendar → MCP viable.** An unauthenticated `initialize` succeeds; the protected-resource metadata points at `https://accounts.google.com/` with the standard `calendar*` scopes, so the token from our own Google OAuth client should work as the `authorization_token`. Phase 3 confirms it with a real call before building on it.
+- **Phase 3 decision (2026-09-24): Google Calendar → REST as well**, without the authenticated MCP spike, because the choice doesn't depend on whether MCP works:
+  - Calendar writes happen **after the athlete taps Confirm** (ADR-007), in code, from the stored plan. With MCP, the booking would be a model turn with `mcp_toolset`, and the confirm gate would be a prompt instruction instead of code. It would also cost a Claude call per booking.
+  - REST gives idempotent retries: events are created with a deterministic id (`croton` + a sha256 of the booking and session), and a 409 becomes a `PUT`, so a retried confirmation never duplicates events. An MCP tool call can't guarantee that.
+  - MCP adds its tool definitions to every call's cached prefix, while REST is ~120 lines (`src/integrations/google/{oauth,calendar,plan-events}.ts`) with no beta header.
+  - Reading the athlete's own events for planning is one REST `GET` (`calendar-context.ts`), rendered into the plan-generation prompt as data.
+  - Scope: `calendar.events` only (events on the primary calendar, no settings or sharing). OAuth uses `access_type=offline` + `prompt=consent` so every grant returns a refresh token, stored per ADR-011.
 - Either path (MCP or REST) exposes the same tool-call surface to the agent orchestrator — the integration layer is swappable, matching spec.md's original intent. The only change is *when* the fallback decision gets made: at the start of Phase 2, not reactively when something breaks in Phase 3.
 
 ---
@@ -128,6 +134,8 @@ system: [
 | Activity summary | Haiku / none (no caching, see ADR-004) | 3K / 0.3K | ~€0.004 |
 | Cold cache write | Sonnet 1h write, ~1 per active day | 2.2K | ~€0.012 |
 
+**Update (Phase 3, 2026-09-24):** chat calls now carry the tool definitions, and tools render before `system`, so they're part of the cached prefix. A measured Sonnet call shows a **7.7K-token cached prefix** (tools ≈ 4.8K, mostly the week-plan schema, plus the static prompt ≈ 2.9K), with a cache write on call 1 and a full read on call 2. A cached read costs ~€0.002 per call, but a cold 1h write now costs ~€0.042 instead of €0.012, which is about +€0.9/month at 30 cold writes. Plan generation uses structured output instead of tools, so it has its own (smaller) cache entry. The new monthly estimate is ~€4.5, still well under the cap.
+
 Typical month: 60 chats €1.44 + 4 recaps €0.52 + 8 adjustments €0.46 + 8 analyses €0.62 + 20 summaries €0.08 + 30 cold writes €0.37 ≈ **€3.50** (spec.md's €1.14 was ~3× low, mostly thinking tokens and all-Sonnet chat). If thinking runs at double the assumption: ~€6. Both are well under the €14 cap, so thinking stays on; `DISABLE_THINKING` is the lever if real numbers drift toward the 75% alert. Once the Phase 5 router moves most chat to Haiku, the chat line drops to ~€0.4/month.
 
 ---
@@ -155,6 +163,13 @@ pending_actions
 ├── expires_at: timestamp    # e.g. 24h — a stale confirmation shouldn't fire days later
 ```
 On bot startup, don't try to resume mid-flow conversationally — if a pending action's `expires_at` has passed, just drop it silently; the athlete can re-trigger `/recap`. This keeps the state machine trivial (one row, checked on the next message from that chat) rather than building a general workflow engine for a single two-step flow.
+
+**Implementation notes (Phase 3):**
+- **Action types.** Confirmations: `set_goal`, `update_profile`, `add_fitness_marker`, `apply_plan` (a week's plan, saved and booked in one step; used for the Sunday plan and mid-week changes, so no separate `book_calendar`). Conversation modes: `recap` (the next message is the week's feedback) and `onboarding` (the chat context gets the onboarding checklist). Payloads are zod-validated when written and again when confirmed (`src/agent/actions.ts`).
+- **Confirmation is a button, not a parsed "yes".** Each proposal is sent as its own message, rendered by code from the payload (so the athlete confirms what will be written, not the model's paraphrase), with Confirm/Cancel inline buttons (`callback_data` `pa:<id>:ok|no`). The bot therefore also receives `callback_query` updates, which the ADR-006 chat check covers.
+- **Exactly once.** Confirm consumes the row with `DELETE … RETURNING`, so a double tap runs once. If execution fails (e.g. an expired Google token), the row is restored with the same id and the buttons stay, so Confirm works again once the cause is fixed.
+- **Expiry:** 24 h for confirmations and `recap`, 7 days for `onboarding`. A newer plan proposal replaces the older one.
+- The model only proposes: chat tools (`src/agent/tools.ts`) create rows, and nothing writes without a tap.
 
 ---
 
@@ -383,3 +398,12 @@ Removing DRM is prohibited in the EU even for owned copies (InfoSoc Directive Ar
 **Why a separate table instead of dated columns:** thresholds change several times a season, and the trend matters for coaching feedback and race prediction (spec.md §15). One row per measurement also gives each value its date and source without doubling every column.
 
 **Phasing:** the import, the onboarding, the load baseline and the context flags are the first part of Phase 3, before weekly plan generation. The breakthrough check (an activity clearly beating a threshold, such as a 20-min power above 105% of FTP, suggests an update) comes later.
+
+**Implementation notes (Phase 3):**
+- **Checked against a real `GET /athlete/{id}` (2026-09-24), recorded in `src/integrations/intervals/test-fixtures.ts` with fake values:** `threshold_pace` is **m/s** whatever `pace_units` says. `power_zones` are **% of FTP** upper bounds, with the last one `999` (open-ended). `hr_zones` are **absolute bpm** upper bounds, with the last one equal to max HR. There's one `sportSettings` entry per group of `types`, plus an "Other" group, which is ignored. `pace_zones` were null for every sport, so their encoding is unverified: run and swim pace zones are always computed in code, and Intervals.icu's zones are used for HR and power only.
+- Marker mapping: bike `ftp` → `ftp_w`; `lthr` → `lthr_bpm` per sport; run `threshold_pace` → `threshold_pace_s_per_km` (1000 / m/s); swim `threshold_pace` → `css_s_per_100m` (100 / m/s); `max_hr` → one `all` marker when it's the same for every sport, otherwise one per sport.
+- Zones (`src/training/zones.ts`): an Intervals.icu zone set is used while its basis (the LTHR or FTP it was built on) equals the current marker. A newer field test or report computes zones in code instead: Coggan power, Friel HR (separate run and bike tables), run pace from the newer of VDOT (Daniels) and threshold pace (Friel %), swim CSS offsets. Each set records its method and basis.
+- VDOT uses the Daniels–Gilbert equations and matches the published table within 0.3 at 5K–marathon for VDOT 40, 50 and 60 (tests). Training paces use VDOT fractions fitted to the VDOT 50 row.
+- Migrations: `0002` adds the tables and columns, and `0003` copies `vdot`/`ftp`/`css` into `fitness_markers` (`athlete_reported`, dated from the profile's `updated_at`) before dropping them. There are two files because drizzle-kit asks interactively when one migration both adds and drops columns on the same table.
+- Field-test detection works from laps, so the protocols in the static prompt say where to press lap. A 20-min lap gives FTP (95%) and LTHR for the bike. The last 20 min of the run test gives LTHR and threshold pace. The 400 m and 200 m laps give CSS. No matching lap means no proposal, and the athlete can report the values in chat.
+- Plan week rule: `/recap` from Friday to Sunday plans next week; from Monday to Thursday it re-plans the rest of this week.

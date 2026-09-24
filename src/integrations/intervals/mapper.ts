@@ -35,12 +35,16 @@ export function healthUpdateFromWellness(record: Wellness): HealthMetricsUpdate 
       bodyBattery: bodyBattery(record),
       weightKg: keep(record.weight),
       bodyFatPct: keep(record.bodyFat),
+      // ADR-016: load metrics, from the same record.
+      ctl: keep(record.ctl),
+      atl: keep(record.atl),
+      rampRate: keep(record.rampRate),
     },
     raw: record,
   };
 }
 
-// A record where nothing we store is set (e.g. only ctl/atl for a day without a sync).
+// A record where nothing we store is set.
 export function hasHealthValues(update: HealthMetricsUpdate): boolean {
   return Object.values(update.values).some((value) => value !== undefined);
 }

@@ -9,7 +9,7 @@ import { hasHealthValues, healthUpdateFromWellness } from "./mapper.js";
 export const WELLNESS_LOOKBACK_DAYS = 3;
 
 type WellnessSyncDeps = {
-  client: IntervalsClient;
+  client: Pick<IntervalsClient, "wellness">;
   health: Pick<HealthMetricsStore, "upsert">;
   timeZone: string;
   logger: Logger;

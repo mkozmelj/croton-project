@@ -13,7 +13,7 @@ describe("createWellnessSync().syncRecent", () => {
           ranges.push([oldest, newest]);
           return [
             { id: "2026-09-22", hrv: 50 },
-            { id: "2026-09-23", ctl: 40 }, // nothing health_metrics stores
+            { id: "2026-09-23", ctl: null }, // nothing health_metrics stores
             { id: "2026-09-24", sleepSecs: 25_200 },
           ];
         },
