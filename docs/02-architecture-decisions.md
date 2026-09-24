@@ -322,6 +322,64 @@ Removing DRM is prohibited in the EU even for owned copies (InfoSoc Directive Ar
 - **Failure alerts** (stack doc §5): the scheduler wraps every job; the first failure of a streak sends one Telegram message and a later success sends one "works again". An expired key produces one alert, not seventeen a day.
 - **Env:** `INTERVALS_API_KEY` (secret, scrubbed from logs), `INTERVALS_ATHLETE_ID` (e.g. `i12345`). Either unset → the job isn't scheduled. The `TERRA_*` variables are removed.
 - **Body composition** (Xiaomi scale → Mi Fitness → Apple Health) doesn't reach Intervals.icu unless the weight also lands in Garmin Connect. It's a weekly trend, so it waits: the athlete can tell the bot, or a later iOS Shortcut can post it. Health Auto Export (~€3/month) is the fallback if that proves too manual.
-- **Bonus for later:** the same records carry Intervals.icu's `ctl` / `atl` / `rampRate` (fitness, fatigue, ramp rate), useful for the ACWR rules in the system prompt. Not stored yet.
+- **Load metrics:** the same records carry Intervals.icu's `ctl` / `atl` / `rampRate` (fitness, fatigue, ramp rate). Stored from Phase 3 on, see ADR-016.
 
 **Revisit if:** Intervals.icu's Garmin sync turns out to miss HRV for this watch (HRV Status needs an Elevate Gen 3+ sensor), or its API terms change.
+
+---
+
+## ADR-016: Fitness baseline — how the agent knows the athlete's current level
+
+**Problem:** Plan quality depends on knowing how fit the athlete is right now, and nothing designed how the agent finds out. `athlete_profile` has `vdot`, `ftp`, `css` and `sport_zones` columns, and [context.ts](../src/agent/context.ts) injects them, but:
+- The only way to fill them was the chat onboarding and `/profile`, both in Phase 5. Weekly plan generation arrives in Phase 3, so the first plans would be built on an empty profile with generic zones.
+- No source is defined for any value: nothing is imported, no field tests are specified, and nothing derives VDOT from a race.
+- There's no load baseline beyond the last two weeks of activities. That isn't enough to apply the 10% rule, set a starting volume or use the ACWR rule. ADR-015 left Intervals.icu's `ctl`/`atl`/`rampRate` "not stored yet".
+- A single value per column has no date or source, so an 8-month-old FTP would drive every workout without anyone noticing.
+- Nothing captures training background (years per sport, typical weekly hours, recent race results, available hours), which a coach uses to set starting volume.
+
+**Decision:**
+
+- **Threshold values become a dated history.** A new `fitness_markers` table replaces `athlete_profile.vdot`/`ftp`/`css` (the migration copies any existing values in with `source: 'athlete_reported'`, then drops the columns):
+  ```
+  fitness_markers
+  ├── id: serial PK
+  ├── sport: text           # 'run' | 'bike' | 'swim' | 'all' (max/resting HR when not sport-specific)
+  ├── metric: text          # 'ftp_w' | 'lthr_bpm' | 'max_hr_bpm' | 'threshold_pace_s_per_km' | 'css_s_per_100m' | 'vdot'
+  ├── value: numeric
+  ├── measured_on: date     # when the value was established, not when the row was written
+  ├── source: text          # 'intervals' | 'field_test' | 'race' | 'athlete_reported'
+  ├── source_ref: text?     # activity external_id or events.id for field_test / race
+  ├── notes: text?
+  ├── created_at: timestamp
+  unique (sport, metric, measured_on, source)   -- upsert target (ADR-009)
+  ```
+  The current value is the latest row per `(sport, metric)`. Older rows stay, so the agent can say "FTP up 12 W since May".
+- **Zones are derived, not maintained by hand.** `athlete_profile.sport_zones` stays as the applied snapshot. It's rewritten whenever a threshold marker changes: Intervals.icu's zones are used as-is when that sport has them, and otherwise they're computed in code (Coggan % of FTP, Friel % of LTHR, Daniels paces from VDOT, CSS offsets). Claude never does the arithmetic. VDOT from a race result also uses the Daniels–Gilbert formula in code (`src/training/`), with tests against published table values.
+- **Source 1: an Intervals.icu import.** `GET /api/v1/athlete/{id}` returns `sportSettings[]`, one per group of activity `types`, with `ftp`, `lthr`, `max_hr`, `threshold_pace` and `hr_zones`/`power_zones`/`pace_zones`. The athlete record has `icu_resting_hr` and `weight`. It runs as a daily `node-cron` job (`intervals-profile`, early morning `Europe/Ljubljana`, plus once on boot) with the same failure-streak alerting as ADR-015. It writes a new marker row only when a value differs from the latest `intervals` row, with `measured_on` = today. It reuses `INTERVALS_API_KEY`/`INTERVALS_ATHLETE_ID`. Before writing the mapper, check the units and zone encoding (for example whether `threshold_pace` is m/s, and whether zones are absolute or % of threshold) against a real response and record them in a fixture.
+- **Source 2: a chat onboarding.** It runs once, triggered from `/start` when `athlete_profile.background` is empty, or with `/onboard`. A short Sonnet conversation collects:
+  - years training per sport and typical weekly hours
+  - recent race results (last ~18 months), which become `race` markers with computed VDOT
+  - weekly availability, which goes into `preferences`
+  - injuries, which go into `injury_notes`
+  - any threshold Intervals.icu didn't supply
+  
+  Writes go through `pending_actions` (`update_profile`, `add_fitness_marker`) with a confirm step, the same rule as goals (ADR-010). `background` is a new `jsonb` column on `athlete_profile`, validated with zod: `{ years_by_sport, typical_weekly_hours, recent_results[], notes }`.
+- **Source 3: field tests.** Protocols go into `STATIC_SYSTEM_PROMPT`. They're static, so they're cached:
+  - bike: 20-min test, FTP = 95% of average power, with LTHR from the same effort
+  - run: Friel 30-min solo test, LTHR = average HR of the last 20 min, threshold pace = average pace
+  - swim: CSS from 400 m + 200 m time trials
+  
+  When a planned test activity arrives, the activity-summary flow proposes the resulting marker for confirmation.
+- **Load baseline is stored.**
+  - `health_metrics` gains `ctl`, `atl` and `ramp_rate`, mapped from the wellness records ADR-015 already fetches.
+  - The context builder takes a `weeks` option. Chat keeps this week + last week. `plan_generation` gets 6 weeks of per-sport totals (time, distance, D+), plus the CTL/ATL/ramp-rate trend over the same window and ACWR from the latest record.
+  - CTL is only as complete as the activities Intervals.icu has, so the athlete enables Garmin activity sync in Intervals.icu as well as wellness. After the first import, check that CTL is plausible against the activity history.
+- **Missing or stale values are flagged, not hidden.**
+  - `profileLines` prints each marker with its age and source ("FTP 245 W, from Intervals.icu, 3 weeks ago").
+  - A marker is **stale** after 12 weeks, or after 8 weeks in the build/peak phases. Stale markers get a "stale" flag in the context.
+  - For each sport with activity in the last 6 weeks, the agent needs at least one intensity anchor: bike `ftp_w` or `lthr_bpm`; run `vdot`, `threshold_pace_s_per_km` or `lthr_bpm`; swim `css_s_per_100m`. A sport without one gets a context line telling the agent to prescribe by RPE and schedule a field test.
+  - Plan generation does **not** refuse to run. An RPE-based week with a test in it beats no plan. It does say at the top of the recap what's missing or stale.
+
+**Why a separate table instead of dated columns:** thresholds change several times a season, and the trend matters for coaching feedback and race prediction (spec.md §15). One row per measurement also gives each value its date and source without doubling every column.
+
+**Phasing:** the import, the onboarding, the load baseline and the context flags are the first part of Phase 3, before weekly plan generation. The breakthrough check (an activity clearly beating a threshold, such as a 20-min power above 105% of FTP, suggests an update) comes later.

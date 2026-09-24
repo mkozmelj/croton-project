@@ -88,3 +88,10 @@ Strava webhooks aren't signed (spec.md §6.5 assumes they are), Terra verificati
 ### No written rule for keeping secrets out of the repo
 Log redaction was covered; commit hygiene wasn't. See ADR-013 and `01-stack-and-principles.md` §9.
 
+
+---
+
+## Added during Phase 2 review (2026-09-24)
+
+### No design for how the agent learns the athlete's current fitness
+`athlete_profile` has columns for VDOT, FTP, CSS and zones, but nothing says where the values come from, and the onboarding that would fill them was scheduled after plan generation. There's also no load baseline beyond two weeks, and no dates on the values to show when they go stale. See ADR-016.

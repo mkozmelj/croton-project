@@ -70,11 +70,24 @@ Concrete, sequential implementation checklist. Supersedes `spec.md` §13's phase
 
 ## Phase 3: Calendar & planning
 
-**Goal:** Same as spec.md §13 Phase 3, with persisted confirmation state.
+**Goal:** Same as spec.md §13 Phase 3, with persisted confirmation state, and plans built on the athlete's real fitness level (ADR-016).
+
+**Fitness baseline first**, before any plan is generated:
+
+- [ ] `fitness_markers` table + migration (copies existing `vdot`/`ftp`/`css` in, then drops those columns); `athlete_profile.background` (`jsonb`, zod-validated); `health_metrics.ctl`/`atl`/`ramp_rate` (ADR-016)
+- [ ] Wellness mapper also maps `ctl`/`atl`/`rampRate` (ADR-015 records, no extra request)
+- [ ] `intervals-profile` cron job: `GET /api/v1/athlete/{id}` → `sportSettings` thresholds + zones → new marker row only on change, failure-streak alerting as for wellness. Fix units/zone encoding from a real response into a test fixture first
+- [ ] `src/training/`: VDOT from a race result (Daniels–Gilbert), zone derivation from FTP / LTHR / VDOT / CSS, tested against published tables; `sport_zones` rewritten when a marker changes
+- [ ] `pending_actions` table + minimal state machine (ADR-007). Needed here already for onboarding writes
+- [ ] Chat onboarding (`/onboard`, auto-offered from `/start` while `background` is empty): background, recent race results, availability, injuries, missing thresholds → confirm → write (`update_profile`, `add_fitness_marker`)
+- [ ] Field-test protocols (FTP 20-min, run LTHR 30-min, CSS 400/200) added to `STATIC_SYSTEM_PROMPT` (re-verify cache hits); activity-summary flow proposes a marker when a planned test is completed
+- [ ] Context: markers with age + source, stale flag (12 weeks, 8 in build/peak), per-sport "no intensity anchor → RPE + schedule a test" line; `weeks` option so plan generation gets 6 weeks of per-sport totals + CTL/ATL/ramp-rate trend + ACWR
+- [ ] `/profile` command (view only): current markers with date and source, zones, background, missing/stale items
+
+**Planning:**
 
 - [ ] Google Calendar integration (MCP-or-REST, same spike-first approach as Strava if not already resolved); tokens in `oauth_tokens` (ADR-011); OAuth consent screen set to "In production" so refresh tokens don't expire after 7 days
-- [ ] `pending_actions` table + minimal state machine (ADR-007)
-- [ ] Weekly plan generation prompt chain (Sonnet, adaptive thinking + effort per ADR-005's table)
+- [ ] Weekly plan generation prompt chain (Sonnet, adaptive thinking + effort per ADR-005's table); recap opens with any missing or stale fitness markers (ADR-016)
 - [ ] Goal setting via chat → `pending_actions` (`set_goal`) → confirm → write `events` + `goals` (ADR-010); `/goals` command
 - [ ] Derive `current_phase` from weeks-to-A-event; inject A goal + upcoming B/C events into the dynamic context block
 - [ ] Sunday cron (`node-cron`, explicit `Europe/Ljubljana` timezone — no "CET" string anywhere)
@@ -82,9 +95,9 @@ Concrete, sequential implementation checklist. Supersedes `spec.md` §13's phase
 - [ ] Mid-week plan adjustment (Sonnet, low effort per ADR-005)
 - [ ] `/recap`, `/plan`, `/tomorrow` commands
 
-**Acceptance:** Trigger `/recap` manually, go through the full conversational flow, confirm, and see real events appear on Google Calendar with correct times in local timezone. Kill and restart the process between "plan generated" and "confirmed" — confirming after restart still works (proves ADR-007). Set an A goal and one B goal via chat; `/goals` lists both with correct weeks remaining, a second A goal for the same season is refused with a replace prompt, and the generated plan reflects the phase derived from the A event date.
+**Acceptance:** Trigger `/recap` manually, go through the full conversational flow, confirm, and see real events appear on Google Calendar with correct times in local timezone. Kill and restart the process between "plan generated" and "confirmed" — confirming after restart still works (proves ADR-007). Set an A goal and one B goal via chat; `/goals` lists both with correct weeks remaining, a second A goal for the same season is refused with a replace prompt, and the generated plan reflects the phase derived from the A event date. After the first `intervals-profile` run, `/profile` shows the FTP / LTHR / threshold pace set in Intervals.icu with today's date and source `intervals`; running the job again adds no rows. Completing onboarding with a recent race result stores a `race` VDOT marker matching Daniels' table. A generated plan uses the athlete's zones (watts / pace / bpm, not generic ones), and with a marker older than 12 weeks, it schedules a field test and says so in the recap.
 
-**Manual steps needed:** spec.md §12.1 #5, §12.2 #10, #11.
+**Manual steps needed:** spec.md §12.1 #5, §12.2 #10, #11, and §12.2 #15 (moved here from Phase 5: done through the chat onboarding). In Intervals.icu, check that FTP / LTHR / threshold pace / max HR are current in Settings → sport settings, and enable Garmin **activity** sync as well as wellness so CTL covers every activity (ADR-016).
 
 ---
 
@@ -116,14 +129,14 @@ Concrete, sequential implementation checklist. Supersedes `spec.md` §13's phase
 - [ ] Conversation summarization/cleanup job (monthly, per spec.md §6.2)
 - [ ] Model router (`src/agent/classifier.ts`) with the Sonnet-biased heuristic from the review doc (#13) — day-of-week/workout/plan/race keywords force Sonnet regardless of message length
 - [ ] Token-refresh retry with backoff + Telegram alert after 3 failures, `/reauth` command
-- [ ] `/profile` command
+- [ ] `/profile` editing (view-only version is in Phase 3; onboarding covers first-time setup)
 - [ ] `pino` structured logging wired everywhere, with secret redaction configured at the logger level
 - [ ] Uncaught-error → Telegram-alert wiring in every webhook handler and cron job (per `01-stack-and-principles.md` §5 — this *is* the observability strategy for this project, make sure it's actually wired everywhere, not just planned)
-- [ ] Athlete-profile onboarding flow via chat
+- [ ] Threshold breakthrough check: an activity clearly beating a marker (e.g. 20-min power > 105% FTP, a run faster than predicted by VDOT) proposes a marker update (ADR-016)
 
 **Acceptance:** Force a Strava token to expire and confirm the retry-then-alert path fires correctly. Force an unhandled exception in a webhook handler and confirm a Telegram alert arrives instead of a silent failure.
 
-**Manual steps needed:** spec.md §12.2 #15.
+**Manual steps needed:** none (§12.2 #15 moved to Phase 3).
 
 ---
 
