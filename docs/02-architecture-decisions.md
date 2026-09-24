@@ -1,0 +1,246 @@
+# Architecture Decisions
+
+ADR-style log of decisions that correct or sharpen `spec.md`. Each entry: the problem, the decision, and why. Where this doc and `spec.md` disagree, **this doc wins** — `spec.md` stays as the original vision document rather than being edited in place.
+
+---
+
+## ADR-001: Model IDs and version pinning
+
+**Problem:** `spec.md` names "Sonnet 4.6" / "Haiku 4.5" with stale pricing (see review doc #1).
+
+**Decision:**
+- Use `claude-sonnet-5` (not `claude-sonnet-4-6`) and `claude-haiku-4-5` (unchanged).
+- Pin both as named constants in `src/config/env.ts`:
+  ```ts
+  export const MODELS = {
+    sonnet: "claude-sonnet-5",
+    haiku: "claude-haiku-4-5",
+  } as const;
+  ```
+- Current pricing (per MTok, for budget calculations): Sonnet 5 — $3.00 in / $15.00 out. Haiku 4.5 — $1.00 in / $5.00 out. Re-derive spec.md §8.4's cost estimates against these figures once ADR-005's thinking policy is applied — thinking tokens count as output tokens and will push per-interaction cost above the spec's original estimates for Sonnet-tier calls.
+- Upgrade path: when Anthropic ships a new model, bump the constant, re-run the budget estimate, and re-check this ADR's cost table — never scatter model ID strings through call sites, so an upgrade is a one-line change plus a cost re-check, matching spec.md §9.3's env-var-driven philosophy but formalized as a code constant instead (env-var overrides are unnecessary complexity for a single-operator app — a code change + redeploy is fine).
+
+---
+
+## ADR-002: MCP-first, but verify before committing
+
+**Problem:** `spec.md` §2.2/§7 assumes `https://mcp.strava.com/mcp` and a Google Calendar MCP endpoint exist and are usable with a bearer token via the Messages API `mcp_servers` parameter. The *mechanism* is real (Anthropic's MCP connector: `mcp_servers` + a paired `mcp_toolset` tool entry + beta header `mcp-client-2025-11-20`) — whether these *specific* third-party servers exist at those URLs was not verified in this review.
+
+**Decision:**
+- Phase 2 of the build plan starts with a 30-minute spike: attempt a real `mcp_servers` call against each URL with a valid OAuth token. Three outcomes:
+  1. **Works** → build the MCP integration path per the corrected snippet below.
+  2. **404 / doesn't exist** → skip MCP entirely for that provider, go straight to REST + custom tools. Do not maintain a dead MCP code path "for later."
+  3. **Exists but auth/behavior differs from assumed** → adjust the snippet, still prefer it over REST if it works.
+- Corrected request shape (what spec.md's snippet was missing):
+  ```ts
+  client.beta.messages.create({
+    model: MODELS.sonnet,
+    betas: ["mcp-client-2025-11-20"],
+    mcp_servers: [{
+      type: "url",
+      url: "https://mcp.strava.com/mcp",
+      name: "strava",
+      authorization_token: stravaAccessToken,
+    }],
+    tools: [{ type: "mcp_toolset", mcp_server_name: "strava" }],
+    // ...
+  });
+  ```
+- **Status (2026-09-23):** a plain `GET` to both `https://mcp.strava.com/mcp` and `https://calendarmcp.googleapis.com/mcp/v1` returns `405 Method Not Allowed` — the servers exist (MCP endpoints only accept `POST` JSON-RPC). So outcome 1 or 3, not 2. The authenticated spike at the start of Phase 2 still decides between MCP and REST.
+- Either path (MCP or REST) exposes the same tool-call surface to the agent orchestrator — the integration layer is swappable, matching spec.md's original intent. The only change is *when* the fallback decision gets made: at the start of Phase 2, not reactively when something breaks in Phase 3.
+
+---
+
+## ADR-003: Conversation storage stores full content blocks, not plain text
+
+**Problem:** `conversations.content: text` can't round-trip `tool_use`/`tool_result` blocks needed to correctly replay a multi-turn conversation (review doc #4).
+
+**Decision:** Change the schema:
+```
+conversations
+├── id: serial PK
+├── role: text                    # 'user' | 'assistant'
+├── content: jsonb                # full Anthropic content-block array, exactly as sent/received
+├── telegram_message_id: bigint
+├── tokens_used: int
+├── model: text
+├── created_at: timestamp
+```
+When building history for a new API call, deserialize `content` directly back into `MessageParam[]` — no re-serialization or summarization at the storage layer. Human-readable text (for `/plan`-style commands that display past messages) is derived from the `text`-type blocks in `content` at render time, not stored separately. This keeps one source of truth instead of two representations drifting apart.
+
+---
+
+## ADR-004: System prompt caching — split static from dynamic
+
+**Problem:** Spec.md §5.1 interpolates dynamic athlete context *before* the static training-principles block in the system prompt, which breaks prompt caching entirely (review doc #7) — caching is a strict prefix match, so anything dynamic ahead of the static block invalidates it on every call.
+
+**Decision:** Structure `system` as an array with the static content first and a cache breakpoint at its end:
+```ts
+system: [
+  {
+    type: "text",
+    text: STATIC_SYSTEM_PROMPT, // role + training principles + tool descriptions + behavior rules, ~3-4K tokens, never changes at runtime
+    cache_control: { type: "ephemeral", ttl: "1h" },
+  },
+  {
+    type: "text",
+    text: buildDynamicContext(athleteProfile, currentPlan, recentActivities, healthMetrics), // changes every call
+  },
+],
+```
+- **1-hour TTL, not the 5-minute default.** The athlete messages sporadically (a few times a day at most, sometimes gaps of many hours) — a 5-minute cache would cold-write on almost every real interaction. The 1-hour TTL's higher write cost (2x vs 1.25x) pays off at ~3 reads, which is the realistic pattern for a day with a couple of messages plus an activity-summary webhook or two.
+- Sonnet 5's minimum cacheable prefix is 1,024 tokens — the ~3-4K token static block clears that comfortably.
+- `STATIC_SYSTEM_PROMPT` must be byte-identical across calls: no timestamps, no non-deterministic serialization anywhere in that string. Verify with `response.usage.cache_read_input_tokens` during Phase 1 smoke-testing — if it's zero after the second call in a session, something in the "static" block isn't actually static.
+
+---
+
+## ADR-005: Thinking and effort policy per call type
+
+**Problem:** Sonnet 5 runs adaptive thinking by default (review doc #8), which spec.md's budget model (§8.4) didn't account for. Left undecided per call type, real spend drifts unpredictably from the estimate.
+
+**Decision (confirmed 2026-09-23): adaptive thinking on for the high-value Sonnet call types, with a kill switch.**
+
+| Classification | Model | Thinking | Effort | Rationale |
+|---|---|---|---|---|
+| `plan_generation` (Sunday recap) | Sonnet | adaptive (on) | `medium` | Highest-stakes output of the week; quality matters more than the marginal cost here. |
+| `plan_adjustment` | Sonnet | adaptive (on) | `low` | Usually a bounded, well-specified edit ("move Thursday's run") — doesn't need deep reasoning. |
+| `analysis` | Sonnet | adaptive (on) | `medium` | Trend analysis benefits from actually reasoning through the data. |
+| `quick_chat` | Haiku | n/a (unsupported) | n/a | Haiku has no thinking/effort controls — nothing to configure. |
+| `activity_summary` | Haiku | n/a | n/a | Same. |
+| `knowledge_qa` | Haiku (+RAG) | n/a | n/a | Same. |
+
+**Kill switch:** `DISABLE_THINKING=true` in env (validated in `src/config/env.ts`) makes `src/agent/claude.ts` send `thinking: {type: "disabled"}` and drop `effort` on every Sonnet call — flip it in Railway's variables if thinking tokens are eating the monthly budget, no code change or redeploy of new code needed. The per-row policy above lives only inside the wrapper, per the stack doc's "one wrapper for all Claude calls" convention.
+
+Re-derive spec.md §8.4's monthly estimate once this is locked in — thinking tokens bill as output tokens at $15/MTok for Sonnet.
+
+---
+
+## ADR-006: Telegram access control
+
+**Problem:** No allowlist on who can message the bot (review doc #6).
+
+**Decision:** Add `TELEGRAM_AUTHORIZED_CHAT_ID` to env config. Every incoming update is checked against it in the grammy middleware chain, before any handler runs; anything else is silently dropped (no reply — don't confirm to a stranger that the bot exists and is listening). Get the chat ID once via `/start` in Phase 1 and hardcode it into the env var — no dynamic multi-user support, matching spec.md's single-athlete scope.
+
+---
+
+## ADR-007: Pending-action state is persisted, not in-memory
+
+**Problem:** The Sunday-recap confirmation flow ("want me to book these on your calendar?") has a window where state must survive a process restart (review doc #5).
+
+**Decision:** Add a minimal table:
+```
+pending_actions
+├── id: serial PK
+├── chat_id: bigint
+├── action_type: text        # 'book_calendar' | ... (extensible, but start with just this one)
+├── payload: jsonb           # the generated plan awaiting confirmation
+├── created_at: timestamp
+├── expires_at: timestamp    # e.g. 24h — a stale confirmation shouldn't fire days later
+```
+On bot startup, don't try to resume mid-flow conversationally — if a pending action's `expires_at` has passed, just drop it silently; the athlete can re-trigger `/recap`. This keeps the state machine trivial (one row, checked on the next message from that chat) rather than building a general workflow engine for a single two-step flow.
+
+---
+
+## ADR-008: Budget enforcement uses a data-driven pricing table
+
+**Problem:** Spec.md §8.2 hardcodes per-model pricing inline in `calculateCost()`. Every model price change (and there will be more, per ADR-001) means a code edit.
+
+**Decision:** Pricing lives in `src/config/pricing.ts` as a plain exported object keyed by the same model constants from ADR-001, imported by both the cost calculator and any future admin/`​/budget` display code. Still a code file, not a DB table or remote config — a single-operator app doesn't need runtime-configurable pricing, just a change that's easy to find and impossible to miss when a model is bumped (co-locate with `MODELS` in the same review).
+
+---
+
+## ADR-009: Webhook idempotency
+
+**Decision:** No change from spec.md's implicit design — it's already correct. `activities.external_id UNIQUE` and `health_metrics.date UNIQUE` mean a retried Strava/Terra webhook naturally upserts rather than duplicating. Make this explicit in the build plan: every webhook handler uses `ON CONFLICT DO UPDATE` (Drizzle's `.onConflictDoUpdate()`), never a plain insert, even on the very first implementation — don't add idempotency later as a fix.
+
+---
+
+## ADR-010: Season goals are first-class, anchored to dated events
+
+**Problem:** Spec.md §4.1 models races as an untyped `race_calendar: jsonb` on `athlete_profile`, and §5.2 says the annual plan is "anchored to target races" — but nothing defines how a goal is set, how a main goal differs from a minor one, or how the agent derives `current_phase` from them. Periodization (base → build → peak → taper) is back-planned from the main event's date, so this is the input the whole plan hangs on and needs to be explicit.
+
+**Decision:** Replace `athlete_profile.race_calendar` with two tables. Every goal is linked to a dated event.
+```
+events
+├── id: serial PK
+├── name: text                # e.g. 'Ironman 70.3 Pula'
+├── date: date                # race day (local date, Europe/Ljubljana)
+├── sport: text               # 'triathlon' | 'run' | 'trail_run' | 'bike' | 'swim' | ...
+├── distance: text            # free text: '70.3', 'half marathon', '42 km / 2500 m D+'
+├── location: text?
+├── calendar_event_id: text?  # Google Calendar event, if booked
+├── created_at / updated_at: timestamp
+
+goals
+├── id: serial PK
+├── event_id: int FK → events.id (NOT NULL)
+├── season: int               # e.g. 2027
+├── priority: text            # 'A' (main) | 'B' | 'C' (minor)
+├── goal_type: text           # 'finish' | 'time' | 'placing' | 'pb'
+├── target: text?             # e.g. '4:45:00', 'top 10 AG' — human-readable
+├── target_seconds: int?      # parsed time target, when goal_type = 'time'
+├── notes: text?              # why this goal matters, constraints
+├── status: text              # 'active' | 'achieved' | 'missed' | 'dropped'
+├── result: text?             # filled in after the event
+├── created_at / updated_at: timestamp
+```
+- **Priority follows Friel's A/B/C race convention:**
+  - **A — main goal.** Exactly one active A goal per season (partial unique index on `(season) WHERE priority = 'A' AND status = 'active'`). The macrocycle is back-planned from its event date: taper → peak → build → base. `current_phase` is *derived* from weeks-to-A-event, not set by hand.
+  - **B — minor goal, prioritized.** Gets a short mini-taper (2–4 days reduced volume) but doesn't reshape the macrocycle. Good as tune-up races 4–8 weeks before the A event.
+  - **C — minor goal, train-through.** No taper; treated as a hard workout in that week's plan.
+- **How goals get set:** by the athlete via Telegram chat ("my main goal for 2027 is sub-4:45 at 70.3 Pula on 2027-09-26"). The agent parses it into a proposed `events` + `goals` row and confirms before writing, via a `pending_actions` row (`action_type: 'set_goal'`, ADR-007) — same confirm-before-write rule as calendar bookings. A `/goals` command lists the season's goals with weeks remaining to each.
+- **Validation (zod, at the tool boundary):** event date must be in the future when creating; rejecting a second active A goal returns a message asking whether to replace the existing one rather than failing silently.
+- **Prompt placement:** goals go in the **dynamic** context block (ADR-004), never the static cached prefix — they change, and a goal edit must not invalidate the cache. Inject: the A goal with weeks-to-event and derived phase, plus upcoming B/C events in the next 12 weeks.
+- **After the event:** the activity-summary flow checks whether a new activity falls on an event date and, if so, asks for the result and updates `status`/`result`. After an A event, the plan moves into the transition/recovery phase (spec.md §5.2).
+
+---
+
+## ADR-011: OAuth tokens live in the database, not in env vars
+
+**Problem:** spec.md §9.3 lists `STRAVA_ACCESS_TOKEN`, `STRAVA_REFRESH_TOKEN`, `GOOGLE_ACCESS_TOKEN` and `GOOGLE_REFRESH_TOKEN` as env vars "set after initial OAuth" (while §7.1 says the backend "stores tokens in DB" — the spec contradicts itself). Env vars can't work: Strava access tokens expire after 6 hours and **a refresh can return a new refresh token that replaces the old one** — the app has no way to write that back into Railway's variables, so the integration would silently die after the first rotation.
+
+**Decision:**
+- Env holds only the *app* credentials: `STRAVA_CLIENT_ID/SECRET`, `GOOGLE_CLIENT_ID/SECRET`. The four per-user token vars are removed from `.env.example`.
+- Per-user tokens go in a table, one row per provider:
+  ```
+  oauth_tokens
+  ├── provider: text PK          # 'strava' | 'google'
+  ├── access_token: text         # encrypted (see below)
+  ├── refresh_token: text        # encrypted
+  ├── expires_at: timestamptz
+  ├── scope: text
+  ├── created_at / updated_at: timestamp
+  ```
+  Every refresh upserts the row with *both* returned tokens (ADR-009 style) — never assume the refresh token is unchanged.
+- **Encrypted at rest with AES-256-GCM** using `TOKEN_ENCRYPTION_KEY` (32 random bytes, base64, env only). Neon already encrypts its disks; this additionally means a leaked `DATABASE_URL` or DB dump doesn't hand out a Google Calendar write token. ~30 lines in `src/integrations/oauth-crypto.ts` using `node:crypto`, with a test.
+- **OAuth `state` is mandatory.** `/auth/<provider>/start` isn't a public link: the bot sends it (from `/start` onboarding or `/reauth`) with a random single-use `state` stored server-side with a 10-minute expiry. The callback rejects any unknown/expired `state` — otherwise anyone who finds the URL could link *their* Strava/Google account to the bot.
+- **Google-specific:** while the Google Cloud OAuth consent screen is in "Testing" status, refresh tokens expire after 7 days. Set the app to "In production" (it stays unverified — fine for a single user who clicks through the warning once) before relying on it in Phase 3.
+
+---
+
+## ADR-012: Every inbound webhook is authenticated before it is parsed
+
+**Problem:** spec.md §6.5 says the backend "verifies [the Strava] webhook signature" — Strava webhooks aren't signed. §7.4 says Terra is verified "using dev ID" — Terra signs with the signing secret, not the dev ID. The Telegram webhook's authentication isn't specified at all.
+
+**Decision — per provider:**
+| Provider | Mechanism | Env |
+|---|---|---|
+| Telegram | `setWebhook` with `secret_token`; reject any request whose `X-Telegram-Bot-Api-Secret-Token` header doesn't match (grammy's `webhookCallback` `secretToken` option). The webhook path is a fixed `/webhook/telegram` — **never put the bot token in the URL** (it would land in access logs). | `TELEGRAM_WEBHOOK_SECRET` |
+| Strava | No payload signature exists. Subscription handshake: answer the `GET` with `hub.challenge` only if `hub.verify_token` matches. Events: accept only if `subscription_id` matches our stored subscription and `owner_id` matches the athlete; then **re-fetch the activity from the Strava API** by id instead of trusting the payload. Respond `200` immediately and process async — Strava requires a response within 2 seconds. | `STRAVA_WEBHOOK_VERIFY_TOKEN` |
+| Terra | HMAC-SHA256 of the **raw request body** with the signing secret, compared against the `terra-signature` header (confirm exact header format against Terra's docs in Phase 2). Needs a Fastify content-type parser that keeps the raw `Buffer` for this route. | `TERRA_SIGNING_SECRET` |
+
+**Rules for all of them:** compare secrets with `crypto.timingSafeEqual`, never `===`. On failure, respond `401` with an empty body and log a warning (no Telegram alert — random scanners would spam it). Authentication happens before `zod` parsing and before any DB write. Each handler gets a test for the reject path, not just the happy path.
+
+---
+
+## ADR-013: Secrets never enter the repository
+
+**Problem:** The repo holds the full spec and personal training-data design; one careless commit of `.env`, a pasted token in a doc, or a debug log with an API key would leak credentials that can spend money (Anthropic, OpenAI) or write to the athlete's calendar.
+
+**Decision:**
+- **Source of truth for secrets:** local `.env` (git-ignored) for dev, Railway service variables for prod. Nothing else. `.env.example` lists every variable with an empty value and a comment — never a real or realistic-looking value.
+- **`.gitignore`** covers `.env` and `.env.*` (except `.env.example`), `node_modules/`, `dist/`, `coverage/`, logs.
+- **Before every commit:** check `git status`/`git diff --cached` for `.env` files, tokens (`sk-ant-`, `sk-`, `npg_`, `ghp_`, bot tokens `<digits>:<35 chars>`), connection strings with passwords, and real chat IDs or personal health values in docs/fixtures. Test fixtures use obviously fake data.
+- **Logs:** `pino` redaction (stack doc §5) is configured in Phase 1, the first phase that handles secrets — not deferred to Phase 5.
+- **If a secret is ever committed:** rotate it at the provider first, then clean history. Removing the file in a later commit doesn't un-leak it.
+- The GitHub repo stays **private**.
