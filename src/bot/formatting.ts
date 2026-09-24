@@ -1,4 +1,12 @@
+import {
+  describeHealth,
+  describeTotals,
+  formatDayTime,
+  type SportTotals,
+} from "../agent/activity-format.js";
 import type { BudgetLevel } from "../agent/budget.js";
+import type { ActivitySummary } from "../db/activities.js";
+import type { HealthMetrics } from "../db/health-metrics.js";
 import type { ModelSpend } from "../db/llm-usage.js";
 
 export const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
@@ -36,9 +44,11 @@ export function startText(chatId: number): string {
   return [
     "Hi, I'm your training coach.",
     "",
-    "Right now I can chat about training: plans, workouts, pacing, recovery. Strava, calendar and health data come in later phases.",
+    "I can chat about training: plans, workouts, pacing, recovery. I see your Strava activities and your Garmin/Apple Health data once they're connected. Calendar and weekly plans come in a later phase.",
     "",
     "Commands:",
+    "/status - this week's training, recovery and budget",
+    "/connect - link your Strava account",
     "/budget - LLM spend this month",
     "",
     `This chat's ID is ${chatId}.`,
@@ -100,4 +110,84 @@ export function budgetRefusalText(): string {
 
 export function failureText(): string {
   return "Something broke while handling that message. It's logged; try again in a bit.";
+}
+
+type StatusSummary = {
+  weekStart: string;
+  weekTotals: SportTotals[];
+  lastActivity: ActivitySummary | null;
+  latestHealth: HealthMetrics | null;
+  stravaConnected: boolean;
+  spendEur: number;
+  capEur: number;
+  level: BudgetLevel;
+  timeZone: string;
+};
+
+export function statusText(status: StatusSummary): string {
+  const lines = [
+    "Phase: not set yet (goals and periodization come with the planning phase)",
+    "",
+    `This week (since Mon ${status.weekStart}):`,
+    ...(status.weekTotals.length > 0
+      ? status.weekTotals.map((totals) => `- ${describeTotals(totals)}`)
+      : ["- nothing logged yet"]),
+  ];
+  if (status.lastActivity) {
+    lines.push(
+      `Last activity: ${formatDayTime(status.lastActivity.startedAt, status.timeZone)}, ${status.lastActivity.name ?? status.lastActivity.sport}`,
+    );
+  }
+  lines.push(
+    "",
+    status.latestHealth
+      ? `Recovery (${status.latestHealth.date}): ${describeHealth(status.latestHealth)}`
+      : "Recovery: no health data yet",
+    "",
+    `Strava: ${status.stravaConnected ? "connected" : "not connected (/connect)"}`,
+    `Budget: ${eur(status.capEur - status.spendEur)} left of ${eur(status.capEur)}, mode ${LEVEL_DESCRIPTIONS[status.level]}`,
+  );
+  return lines.join("\n");
+}
+
+export function connectText(url: string): string {
+  return `Open this link to connect Strava (valid for 10 minutes, works once):\n${url}`;
+}
+
+export function stravaConnectedText(): string {
+  return "Strava connected. New activities will show up here with a short summary.";
+}
+
+export function stravaRevokedText(): string {
+  return "Strava access was revoked, so I no longer get your activities. Send /connect to link it again.";
+}
+
+export function activityFailureText(): string {
+  return "Something broke while processing a Strava activity. It's logged; I'll look into it.";
+}
+
+export function terraUnparseableText(): string {
+  return "Received health data I couldn't read. It's logged; I'll look into it.";
+}
+
+export function serverFailureText(route: string): string {
+  const what = route.startsWith("/webhook/terra")
+    ? "storing health data (Terra will resend it)"
+    : route.startsWith("/webhook/strava")
+      ? "receiving a Strava update"
+      : route.startsWith("/auth/")
+        ? "connecting an account"
+        : `handling ${route}`;
+  return `Something broke while ${what}. It's logged; I'll look into it.`;
+}
+
+export function terraAuthText(
+  type: string,
+  status: string | null,
+  provider: string | null,
+): string {
+  const source = provider ?? "a device";
+  if (type === "auth" && status === "success") return `Health data connected: ${source}.`;
+  if (type === "user_reauth") return `Health data reconnected: ${source}.`;
+  return `Health data connection changed (${type}${status ? `, ${status}` : ""}) for ${source}. Check the Terra app.`;
 }

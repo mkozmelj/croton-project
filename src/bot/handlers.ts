@@ -30,7 +30,7 @@ export function registerMessageHandlers(
 ) {
   bot.on("message:text", async (ctx) => {
     if (ctx.message.text.startsWith("/")) {
-      await ctx.reply("Unknown command. Try /budget.");
+      await ctx.reply("Unknown command. Try /status or /budget.");
       return;
     }
 

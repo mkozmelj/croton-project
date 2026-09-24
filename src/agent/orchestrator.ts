@@ -1,11 +1,13 @@
 import type { ContentBlockParam, Message } from "@anthropic-ai/sdk/resources/messages/messages";
 import type { ConversationStore } from "../db/conversations.js";
 import type { Claude } from "./claude.js";
+import type { ContextBuilder } from "./context.js";
 import { HISTORY_LIMIT, textOf, toMessageParams } from "./history.js";
 
 type OrchestratorDeps = {
   claude: Pick<Claude, "call">;
   conversations: ConversationStore;
+  context?: ContextBuilder;
 };
 
 export type IncomingMessage = {
@@ -18,8 +20,12 @@ export type Orchestrator = {
   handleMessage(incoming: IncomingMessage): Promise<string>;
 };
 
-// Phase 1: every free-text message is a `chat` call. The Phase 5 router replaces this choice.
-export function createOrchestrator({ claude, conversations }: OrchestratorDeps): Orchestrator {
+// Until the Phase 5 router: every free-text message is a `chat` call. The Phase 5 router replaces this choice.
+export function createOrchestrator({
+  claude,
+  conversations,
+  context,
+}: OrchestratorDeps): Orchestrator {
   return {
     async handleMessage({ text, telegramMessageId }) {
       await conversations.append({
@@ -29,7 +35,12 @@ export function createOrchestrator({ claude, conversations }: OrchestratorDeps):
       });
 
       const history = toMessageParams(await conversations.recent(HISTORY_LIMIT));
-      const { message, model } = await claude.call({ callType: "chat", messages: history });
+      const dynamicContext = await context?.build();
+      const { message, model } = await claude.call({
+        callType: "chat",
+        messages: history,
+        ...(dynamicContext ? { dynamicContext } : {}),
+      });
 
       await conversations.append({
         role: "assistant",

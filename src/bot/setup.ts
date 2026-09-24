@@ -1,19 +1,15 @@
 import type { Bot } from "grammy";
 import type { Logger } from "pino";
 import type { Orchestrator } from "../agent/orchestrator.js";
-import type { UsageStore } from "../db/llm-usage.js";
 import { authorizedChatOnly } from "./access-control.js";
-import { COMMANDS, registerCommands } from "./commands.js";
+import { COMMANDS, type CommandDeps, registerCommands } from "./commands.js";
 import { errorBoundary, registerMessageHandlers } from "./handlers.js";
 
 export const TELEGRAM_WEBHOOK_PATH = "/webhook/telegram";
 
-type BotDeps = {
+type BotDeps = CommandDeps & {
   authorizedChatId: number;
   orchestrator: Orchestrator;
-  usage: Pick<UsageStore, "spendByModelSince">;
-  monthlyBudgetEur: number;
-  timeZone: string;
   logger: Logger;
 };
 

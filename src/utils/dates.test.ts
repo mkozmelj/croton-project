@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { localDate, monthStart } from "./dates.js";
+import { addDays, localDate, localMidnight, monthStart, weekStart } from "./dates.js";
 
 describe("localDate", () => {
   it("uses the local calendar date, not UTC", () => {
@@ -18,5 +18,40 @@ describe("localDate", () => {
 describe("monthStart", () => {
   it("returns the first day of the month", () => {
     expect(monthStart("2026-09-24")).toBe("2026-09-01");
+  });
+});
+
+describe("localMidnight", () => {
+  it("returns the UTC instant of local midnight in summer and winter", () => {
+    expect(localMidnight("2026-09-24", "Europe/Ljubljana").toISOString()).toBe(
+      "2026-09-23T22:00:00.000Z",
+    );
+    expect(localMidnight("2027-01-15", "Europe/Ljubljana").toISOString()).toBe(
+      "2027-01-14T23:00:00.000Z",
+    );
+  });
+
+  it("handles the days DST starts and ends", () => {
+    expect(localMidnight("2027-03-28", "Europe/Ljubljana").toISOString()).toBe(
+      "2027-03-27T23:00:00.000Z",
+    );
+    expect(localMidnight("2026-10-25", "Europe/Ljubljana").toISOString()).toBe(
+      "2026-10-24T22:00:00.000Z",
+    );
+  });
+});
+
+describe("weekStart", () => {
+  it("returns the Monday of the week", () => {
+    expect(weekStart("2026-09-24")).toBe("2026-09-21"); // Thursday
+    expect(weekStart("2026-09-21")).toBe("2026-09-21"); // Monday
+    expect(weekStart("2026-09-27")).toBe("2026-09-21"); // Sunday
+  });
+});
+
+describe("addDays", () => {
+  it("crosses month boundaries", () => {
+    expect(addDays("2026-09-28", 7)).toBe("2026-10-05");
+    expect(addDays("2026-10-01", -1)).toBe("2026-09-30");
   });
 });

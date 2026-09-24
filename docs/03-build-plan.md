@@ -39,7 +39,7 @@ Concrete, sequential implementation checklist. Supersedes `spec.md` §13's phase
 - [x] `DISABLE_THINKING` kill switch in `env.ts` + wrapper (ADR-005); spec.md §8.4's monthly estimate re-derived in ADR-005
 - [x] Basic system prompt: static training-principles block only (no dynamic context yet — that's Phase 2+), structured per ADR-004 even though there's nothing dynamic to append yet
 - [x] `/start`, `/budget` commands
-- [ ] Deploy to Railway, `setWebhook` call runs automatically on boot in prod mode (code done; needs the Railway variables and a push to `main`)
+- [x] Deploy to Railway, `setWebhook` call runs automatically on boot in prod mode (verified 2026-09-24: `/budget` answers via the prod webhook)
 
 **Acceptance:** Message the bot from the authorized chat, get a Claude-generated reply, see a row land in `llm_usage` with the correct model/cost. Message from any other chat produces no reply. `response.usage.cache_read_input_tokens` is non-zero on the second message in a session (verifies ADR-004's caching actually works before more prompt content gets added on top of it).
 
@@ -51,15 +51,16 @@ Concrete, sequential implementation checklist. Supersedes `spec.md` §13's phase
 
 **Goal:** Same as spec.md §13 Phase 2, with the MCP-vs-REST decision made first.
 
-- [ ] **MCP spike (ADR-002):** 30-minute check of the two MCP URLs (both already confirmed to exist — `405` on `GET`, 2026-09-23; the authenticated call is what's left). Record the outcome directly in this file (edit this checklist to strike out whichever path isn't used) before writing integration code.
-- [ ] `oauth_tokens` table + AES-256-GCM token encryption (`TOKEN_ENCRYPTION_KEY`) (ADR-011)
-- [ ] Strava OAuth flow with single-use `state` + token refresh that re-saves both tokens (`src/integrations/strava/oauth.ts`, ADR-011)
-- [ ] Strava webhook handler: verify-token handshake, `subscription_id`/`owner_id` check, 200 within 2s + async processing, re-fetch activity via API (ADR-012), upsert-by-`external_id` (ADR-009) — no plain inserts
-- [ ] Terra webhook handler: HMAC check on the raw body (ADR-012), upsert-by-`date` (ADR-009)
-- [ ] Full schema: `activities`, `health_metrics`, `athlete_profile` (without `race_calendar`), `events`, `goals` (ADR-010, incl. the one-active-A-goal-per-season partial unique index)
-- [ ] Activity-summary flow (Haiku, no thinking per ADR-005) → Telegram notification
-- [ ] `/status` command
-- [ ] Dynamic context block now gets appended to the system prompt (ADR-004's second array element) — re-verify caching still hits on the static portion after this change
+- [x] **MCP spike (ADR-002):** done 2026-09-24, outcome recorded in ADR-002. **Strava: REST** (~~MCP path~~): `mcp.strava.com` authorizes through its own issuer (`www.strava.com/oauth/mcp/*`, dynamic client registration), so the API-app token doesn't apply there, and the webhook flow needs the API-app token anyway. **Google Calendar: MCP viable** (standard `accounts.google.com` OAuth, `initialize` works), decided in Phase 3.
+- [x] `oauth_tokens` table + AES-256-GCM token encryption (`TOKEN_ENCRYPTION_KEY`) (ADR-011) — `src/integrations/oauth-crypto.ts`, `src/db/oauth-tokens.ts`; single-use states in `oauth_states`
+- [x] Strava OAuth flow with single-use `state` + token refresh that re-saves both tokens (`src/integrations/strava/oauth.ts`, `auth-routes.ts`, ADR-011) — the bot's `/connect` mints the state and sends the link
+- [x] Strava webhook handler: verify-token handshake, `subscription_id`/`owner_id` check, 200 within 2s + async processing, re-fetch activity via API (ADR-012), upsert-by-`external_id` (ADR-009) — no plain inserts. Subscription via `npm run strava:subscribe`
+- [x] Terra webhook handler: HMAC check on the raw body (ADR-012), upsert-by-`date` (ADR-009)
+- [x] Full schema: `activities`, `health_metrics`, `athlete_profile` (without `race_calendar`), `events`, `goals` (ADR-010, incl. the one-active-A-goal-per-season partial unique index) — migration `drizzle/0001_phase2_data_layer.sql`
+- [x] Activity-summary flow (Haiku, no thinking per ADR-005) → Telegram notification — summarized once per new activity, plain-text fallback when over budget
+- [x] `/status` command
+- [x] Dynamic context block now gets appended to the system prompt (ADR-004's second array element) — re-verify caching still hits on the static portion after this change. **Verified 2026-09-24:** call 1 `cache_creation_input_tokens: 2298`, call 2 `cache_read_input_tokens: 2298`, with a fresh context block (~300 tokens) on each call.
+- [ ] Deploy + connect: set `TOKEN_ENCRYPTION_KEY` in Railway, deploy, `/connect` from Telegram, `npm run strava:subscribe -- create <APP_URL>`, set `STRAVA_SUBSCRIPTION_ID`, redeploy; Terra account + `TERRA_SIGNING_SECRET` (see the pricing check in ADR-012's notes first)
 
 **Acceptance:** A real Strava activity (or a simulated webhook payload in a test) produces a Telegram summary within seconds and a correctly-upserted DB row. Health metrics from Terra populate `health_metrics` without duplicate rows on webhook retry.
 

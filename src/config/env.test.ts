@@ -55,4 +55,13 @@ describe("parseEnv", () => {
   it("rejects a webhook secret with characters Telegram won't accept", () => {
     expect(() => parseEnv({ ...base, TELEGRAM_WEBHOOK_SECRET: `${"a".repeat(20)}!` })).toThrow();
   });
+
+  it("accepts a 32-byte base64 encryption key and rejects anything else", () => {
+    const key = Buffer.alloc(32, 7).toString("base64");
+    expect(parseEnv({ ...base, TOKEN_ENCRYPTION_KEY: key }).TOKEN_ENCRYPTION_KEY).toBe(key);
+    expect(() =>
+      parseEnv({ ...base, TOKEN_ENCRYPTION_KEY: Buffer.alloc(16).toString("base64") }),
+    ).toThrow(/TOKEN_ENCRYPTION_KEY/);
+    expect(() => parseEnv({ ...base, TOKEN_ENCRYPTION_KEY: "not base64!" })).toThrow();
+  });
 });

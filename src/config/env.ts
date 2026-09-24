@@ -16,6 +16,12 @@ const booleanString = z
 
 const optionalSecret = z.string().min(1).optional();
 
+// ADR-011: AES-256-GCM needs exactly 32 key bytes (`openssl rand -base64 32`).
+const encryptionKey = z
+  .base64()
+  .refine((value) => Buffer.from(value, "base64").length === 32, "must decode to 32 bytes")
+  .optional();
+
 const envSchema = z
   .object({
     NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
@@ -43,9 +49,11 @@ const envSchema = z
     STRAVA_CLIENT_ID: optionalSecret,
     STRAVA_CLIENT_SECRET: optionalSecret,
     STRAVA_WEBHOOK_VERIFY_TOKEN: optionalSecret,
+    // Printed by `npm run strava:subscribe`. Not a secret; events for any other id are rejected.
+    STRAVA_SUBSCRIPTION_ID: z.coerce.number().int().positive().optional(),
     GOOGLE_CLIENT_ID: optionalSecret,
     GOOGLE_CLIENT_SECRET: optionalSecret,
-    TOKEN_ENCRYPTION_KEY: optionalSecret,
+    TOKEN_ENCRYPTION_KEY: encryptionKey,
     TERRA_API_KEY: optionalSecret,
     TERRA_DEV_ID: optionalSecret,
     TERRA_SIGNING_SECRET: optionalSecret,

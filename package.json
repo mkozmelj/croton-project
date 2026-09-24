@@ -17,7 +17,8 @@
     "test": "vitest run",
     "check": "biome check . && tsc --noEmit && vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "strava:subscribe": "tsx --env-file-if-exists=.env src/integrations/strava/subscribe-cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",
