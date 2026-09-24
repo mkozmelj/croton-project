@@ -10,15 +10,15 @@ export type HealthMetricValues = Partial<
 
 export type HealthMetricsUpdate = {
   date: string;
-  // Terra payload type the values came from ('sleep' | 'daily' | 'body').
+  // Where the values came from; the key under which `raw` is kept in raw_data.
   source: string;
   values: HealthMetricValues;
   raw: unknown;
 };
 
 export type HealthMetricsStore = {
-  // ADR-009: upsert on `date`. Only the given columns are overwritten, so a sleep payload
-  // doesn't null out the weight from an earlier body payload for the same day.
+  // ADR-009: upsert on `date`. Only the given columns are overwritten, so a record that
+  // lacks a value (e.g. no weigh-in that day) never nulls out one stored earlier.
   upsert(update: HealthMetricsUpdate): Promise<void>;
   // Rows on or after `fromDate` (YYYY-MM-DD), newest first.
   since(fromDate: string): Promise<HealthMetrics[]>;

@@ -8,11 +8,11 @@ import type { StravaConnectDeps } from "./bot/commands.js";
 import {
   activityFailureText,
   budgetAlertText,
+  jobFailureText,
+  jobRecoveredText,
   serverFailureText,
   stravaConnectedText,
   stravaRevokedText,
-  terraAuthText,
-  terraUnparseableText,
 } from "./bot/formatting.js";
 import { createNotifier } from "./bot/notifier.js";
 import { type BotTransport, configureBot, startBot } from "./bot/setup.js";
@@ -26,6 +26,11 @@ import { createHealthMetricsStore } from "./db/health-metrics.js";
 import { createUsageStore } from "./db/llm-usage.js";
 import { createOAuthStateStore } from "./db/oauth-states.js";
 import { createOAuthTokenStore } from "./db/oauth-tokens.js";
+import {
+  createIntervalsClient,
+  intervalsBasicCredentials,
+} from "./integrations/intervals/client.js";
+import { createWellnessSync } from "./integrations/intervals/wellness-sync.js";
 import { createTokenCipher } from "./integrations/oauth-crypto.js";
 import { createStravaActivitySync } from "./integrations/strava/activity-sync.js";
 import {
@@ -36,8 +41,8 @@ import {
 import { createStravaClient } from "./integrations/strava/client.js";
 import { createStravaAuth } from "./integrations/strava/oauth.js";
 import { registerStravaWebhook } from "./integrations/strava/webhook.js";
-import { registerTerraWebhook } from "./integrations/terra/webhook.js";
 import { connectionStringSecrets, createLogger } from "./logging/logger.js";
+import { type Job, type Scheduler, startScheduler } from "./scheduler/cron.js";
 import { buildServer } from "./server.js";
 import { createBackgroundTasks } from "./utils/background.js";
 
@@ -52,8 +57,8 @@ const logger = createLogger({
       env.STRAVA_CLIENT_SECRET,
       env.STRAVA_WEBHOOK_VERIFY_TOKEN,
       env.TOKEN_ENCRYPTION_KEY,
-      env.TERRA_API_KEY,
-      env.TERRA_SIGNING_SECRET,
+      env.INTERVALS_API_KEY,
+      env.INTERVALS_API_KEY && intervalsBasicCredentials(env.INTERVALS_API_KEY),
     ].filter((secret) => secret !== undefined),
   ],
 });
@@ -159,17 +164,28 @@ if (env.STRAVA_CLIENT_ID && env.STRAVA_CLIENT_SECRET && env.TOKEN_ENCRYPTION_KEY
   );
 }
 
-if (env.TERRA_SIGNING_SECRET) {
-  registerTerraWebhook(app, {
-    signingSecret: env.TERRA_SIGNING_SECRET,
-    timeZone: env.TIMEZONE,
+const jobs: Job[] = [];
+if (env.INTERVALS_API_KEY && env.INTERVALS_ATHLETE_ID) {
+  const wellness = createWellnessSync({
+    client: createIntervalsClient({
+      apiKey: env.INTERVALS_API_KEY,
+      athleteId: env.INTERVALS_ATHLETE_ID,
+    }),
     health,
-    onAuthEvent: (event) =>
-      notifier.notify(terraAuthText(event.type, event.status, event.provider)),
-    onUnparseable: () => notifier.notify(terraUnparseableText()),
+    timeZone: env.TIMEZONE,
+    logger,
+  });
+  // ADR-015: hourly while awake, so the morning's sleep/HRV shows up soon after the watch syncs.
+  jobs.push({
+    name: "intervals-wellness",
+    cron: "15 6-22 * * *",
+    runOnStart: true,
+    run: async () => {
+      await wellness.syncRecent();
+    },
   });
 } else {
-  logger.info({ module: "terra" }, "Terra disabled (TERRA_SIGNING_SECRET unset)");
+  logger.info({ module: "intervals" }, "Intervals.icu disabled (API key or athlete id unset)");
 }
 
 configureBot(bot, {
@@ -188,11 +204,13 @@ configureBot(bot, {
   logger,
 });
 
+let scheduler: Scheduler | undefined;
+
 // Railway sends SIGTERM on every redeploy — let in-flight requests finish first.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
     logger.info({ signal }, "shutting down");
-    Promise.all([app.close(), bot.isRunning() ? bot.stop() : undefined])
+    Promise.all([app.close(), bot.isRunning() ? bot.stop() : undefined, scheduler?.stop()])
       // Let an activity summary that's already running finish and send.
       .then(() => tasks.drain())
       .then(
@@ -210,6 +228,14 @@ try {
   logger.info({ module: "db" }, "migrations applied");
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
   await startBot(bot, { transport, authorizedChatId: env.TELEGRAM_AUTHORIZED_CHAT_ID, logger });
+  // After migrations: jobs write to the DB, and runOnStart jobs fire immediately.
+  scheduler = startScheduler({
+    jobs,
+    timeZone: env.TIMEZONE,
+    logger,
+    onFailure: (name, error) => notifier.notify(jobFailureText(name, error)),
+    onRecovered: (name) => notifier.notify(jobRecoveredText(name)),
+  });
   logger.info({ transport: transport.mode, thinkingDisabled: env.DISABLE_THINKING }, "started");
 } catch (error) {
   logger.fatal({ err: error }, "startup failed");

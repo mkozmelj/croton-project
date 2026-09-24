@@ -82,7 +82,7 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
             )
           : ["- none"]),
         "",
-        `HEALTH, LAST ${HEALTH_DAYS} DAYS (Garmin/Apple Health via Terra, newest first)`,
+        `HEALTH, LAST ${HEALTH_DAYS} DAYS (Garmin via Intervals.icu, newest first)`,
         ...(health.length > 0
           ? health.map((row) => `- ${row.date}: ${describeHealth(row)}`)
           : ["- no data"]),

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { budgetText, splitMessage } from "./formatting.js";
+import { IntervalsApiError } from "../integrations/intervals/client.js";
+import { budgetText, jobFailureText, splitMessage } from "./formatting.js";
 
 describe("splitMessage", () => {
   it("leaves short text alone", () => {
@@ -30,5 +31,15 @@ describe("budgetText", () => {
     });
     expect(text).toContain("€1.40 of €14.00 (10%)");
     expect(text).toContain("- claude-sonnet-5: 12 calls, €1.40, 24,000 cached tokens read");
+  });
+});
+
+describe("jobFailureText", () => {
+  it("points at the API key only when Intervals.icu rejected it", () => {
+    const rejected = jobFailureText("intervals-wellness", new IntervalsApiError(401, "/x"));
+    expect(rejected).toContain("check INTERVALS_API_KEY");
+    const outage = jobFailureText("intervals-wellness", new IntervalsApiError(503, "/x"));
+    expect(outage).not.toContain("INTERVALS_API_KEY");
+    expect(outage).toMatch(/^Fetching health data from Intervals\.icu failed\./);
   });
 });

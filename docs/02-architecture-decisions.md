@@ -173,7 +173,7 @@ On bot startup, don't try to resume mid-flow conversationally — if a pending a
 
 ## ADR-009: Webhook idempotency
 
-**Decision:** No change from spec.md's implicit design — it's already correct. `activities.external_id UNIQUE` and `health_metrics.date UNIQUE` mean a retried Strava/Terra webhook naturally upserts rather than duplicating. Make this explicit in the build plan: every webhook handler uses `ON CONFLICT DO UPDATE` (Drizzle's `.onConflictDoUpdate()`), never a plain insert, even on the very first implementation — don't add idempotency later as a fix.
+**Decision:** No change from spec.md's implicit design — it's already correct. `activities.external_id UNIQUE` and `health_metrics.date UNIQUE` mean a retried Strava webhook, or an Intervals.icu sync re-reading days it already stored (ADR-015), naturally upserts rather than duplicating. Make this explicit in the build plan: every webhook handler uses `ON CONFLICT DO UPDATE` (Drizzle's `.onConflictDoUpdate()`), never a plain insert, even on the very first implementation — don't add idempotency later as a fix.
 
 ---
 
@@ -250,13 +250,10 @@ goals
 |---|---|---|
 | Telegram | `setWebhook` with `secret_token`; reject any request whose `X-Telegram-Bot-Api-Secret-Token` header doesn't match (grammy's `webhookCallback` `secretToken` option). The webhook path is a fixed `/webhook/telegram` — **never put the bot token in the URL** (it would land in access logs). | `TELEGRAM_WEBHOOK_SECRET` |
 | Strava | No payload signature exists. Subscription handshake: answer the `GET` with `hub.challenge` only if `hub.verify_token` matches. Events: accept only if `subscription_id` matches our stored subscription and `owner_id` matches the athlete; then **re-fetch the activity from the Strava API** by id instead of trusting the payload. Respond `200` immediately and process async — Strava requires a response within 2 seconds. | `STRAVA_WEBHOOK_VERIFY_TOKEN` |
-| Terra | HMAC-SHA256 of the **raw request body** with the signing secret, compared against the `terra-signature` header (confirm exact header format against Terra's docs in Phase 2). Needs a Fastify content-type parser that keeps the raw `Buffer` for this route. | `TERRA_SIGNING_SECRET` |
+| ~~Terra~~ | Removed with Terra itself (ADR-015). Health data is now pulled from Intervals.icu with an API key, so there is no inbound health webhook to authenticate. | — |
 
 **Implementation notes (Phase 2):**
-- **Terra header confirmed** against docs.tryterra.co (2026-09-24): `terra-signature: t=<unix s>,v1=<hex>[,v1=…]`, `v1 = HMAC-SHA256(secret, "<t>.<raw body>")`; ignore any scheme other than `v1`. No timestamp tolerance is enforced: Terra retries for ~8 h (10 attempts) with the original signature, and every write is an idempotent upsert, so a replay changes nothing. Use inline (non-ping) delivery in the Terra dashboard; ping mode would send an S3 URL instead of the data.
 - **Strava event checks** need the parsed body (the ids are in it), so the order is: parse JSON → zod → `subscription_id` / `owner_id` check → 200 → async processing. The verify-token handshake is checked before anything else. `STRAVA_SUBSCRIPTION_ID` unset = every event rejected.
-- **Terra failure handling:** a signed payload that doesn't parse is acknowledged with 200 plus a Telegram alert (retrying a deterministic failure 10 times is pointless; Terra's payload history keeps it). A DB failure alerts and answers 500 so Terra retries.
-- **Terra pricing — check before connecting.** Terra's current docs price the Unified API in credits: 200 credits per active authentication per month and 0.5 credits per event past 400, with 100,000 credits a month included in "your subscription" (Quick Start plan). The docs don't state the subscription fee itself, and spec.md's "free tier, 500 users" no longer appears. Check the dashboard's plan price before §12.1 #8: if there is a monthly fee of any size, it doesn't fit the €20 cap, and R-02's fallback (Health Auto Export, or the `garminconnect` cron for HRV) becomes the plan. The webhook code is small and self-contained, so either way nothing else depends on Terra.
 - Routes that carry secrets in the query string (`/auth/strava/callback`'s `code`, the Strava handshake's `hub.verify_token`) log at `warn` only, so Fastify's per-request info line never writes them.
 
 **Rules for all of them:** compare secrets with `crypto.timingSafeEqual`, never `===`. On failure, respond `401` with an empty body and log a warning (no Telegram alert — random scanners would spam it). Authentication happens before `zod` parsing and before any DB write. Each handler gets a test for the reject path, not just the happy path.
@@ -311,3 +308,20 @@ Removing DRM is prohibited in the EU even for owned copies (InfoSoc Directive Ar
 - **Schema change from spec.md §4.1** — `literature_chunks` gains `section`, `locator` (page or location, for citations), `source_type` (`paper` | `article` | `book_scan` | `notes`), `content_hash`, unique `(source, content_hash)`. The embedding is stored as `real[]`; pgvector isn't needed while search stays in memory.
 - **Retrieval eval.** A fixture of 15–20 questions with the expected source; top-5 recall is checked whenever chunking changes.
 - **Open question, decide before Phase 4 starts:** the embedding provider. The candidates are OpenAI `text-embedding-3-small` (spec default, adds a second vendor) and Voyage AI (Anthropic's recommended embeddings partner). Cost is negligible either way at this corpus size.
+
+---
+
+## ADR-015: Health data comes from Intervals.icu, not Terra
+
+**Problem:** spec.md §7.3 routes Garmin and Apple Health data through Terra's API because Garmin doesn't write HRV to Apple Health. Terra's free tier is gone (checked 2026-09-24): the Unified API is billed per active authentication and per event on top of a paid subscription, which the €20/month cap can't carry. Garmin's own Health API is free but only for approved business partners, and the unofficial Garmin Connect login libraries (`garminconnect`, `garth`) break Garmin's terms and break whenever Garmin changes its login flow.
+
+**Decision:**
+- **Read wellness data from Intervals.icu.** It is an official Garmin partner: with "Download wellness data" enabled under Settings → Connections → Garmin, it receives the athlete's Garmin wellness data. Its free REST API takes a personal API key (HTTP basic auth, user `API_KEY`). `GET /api/v1/athlete/{id}/wellness?oldest=&newest=` returns one record per local date.
+- **Mapping** (`src/integrations/intervals/mapper.ts`): `sleepSecs` → `sleep_duration_minutes`, `sleepScore` → `sleep_quality_score`, `hrv` → `hrv_ms`, `restingHR` → `resting_hr`, `stress` → `stress_avg`, `weight` → `weight_kg`, `bodyFat` → `body_fat_pct`. No sleep stages: `deep_sleep_minutes` and `rem_sleep_minutes` stay empty. There's no standard Body Battery field; if the Garmin sync adds one as a custom field (any numeric key named like `BodyBattery`), it's picked up, and `raw_data.intervals` keeps the whole record to check against.
+- **Polling, not webhooks.** A `node-cron` job (`intervals-wellness`, `15 6-22 * * *`, `Europe/Ljubljana`, plus once on boot) re-reads the last 3 local days and upserts by date (ADR-009). Re-reading covers a watch that syncs late and a sleep score revised in the morning. That's about 17 requests a day. With no inbound endpoint, nothing needs webhook authentication.
+- **Failure alerts** (stack doc §5): the scheduler wraps every job; the first failure of a streak sends one Telegram message and a later success sends one "works again". An expired key produces one alert, not seventeen a day.
+- **Env:** `INTERVALS_API_KEY` (secret, scrubbed from logs), `INTERVALS_ATHLETE_ID` (e.g. `i12345`). Either unset → the job isn't scheduled. The `TERRA_*` variables are removed.
+- **Body composition** (Xiaomi scale → Mi Fitness → Apple Health) doesn't reach Intervals.icu unless the weight also lands in Garmin Connect. It's a weekly trend, so it waits: the athlete can tell the bot, or a later iOS Shortcut can post it. Health Auto Export (~€3/month) is the fallback if that proves too manual.
+- **Bonus for later:** the same records carry Intervals.icu's `ctl` / `atl` / `rampRate` (fitness, fatigue, ramp rate), useful for the ACWR rules in the system prompt. Not stored yet.
+
+**Revisit if:** Intervals.icu's Garmin sync turns out to miss HRV for this watch (HRV Status needs an Elevate Gen 3+ sensor), or its API terms change.

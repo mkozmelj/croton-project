@@ -95,7 +95,7 @@ export const activities = pgTable(
   {
     id: serial("id").primaryKey(),
     externalId: text("external_id").notNull().unique(),
-    source: text("source", { enum: ["strava", "terra", "trainingpeaks_import"] }).notNull(),
+    source: text("source", { enum: ["strava", "trainingpeaks_import"] }).notNull(),
     sport: text("sport").notNull(),
     name: text("name"),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
@@ -118,8 +118,8 @@ export const activities = pgTable(
   (table) => [index("activities_started_at_idx").on(table.startedAt)],
 );
 
-// ADR-009: one row per local date, upserted by every Terra payload type. Each type only
-// sets its own columns; `raw_data` keeps the latest payload per type ({ sleep, daily, body }).
+// ADR-009: one row per local date, upserted on `date`. An upsert only sets the columns it
+// has values for; `raw_data` keeps the latest record per source (ADR-015: { intervals }).
 export const healthMetrics = pgTable("health_metrics", {
   id: serial("id").primaryKey(),
   date: date("date", { mode: "string" }).notNull().unique(),

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { OAuthTokenStore } from "../../db/oauth-tokens.js";
+import { timeoutSignal } from "../../utils/http.js";
 
 const AUTHORIZE_URL = "https://www.strava.com/oauth/authorize";
 const TOKEN_URL = "https://www.strava.com/oauth/token";
@@ -57,6 +58,7 @@ export function createStravaAuth(deps: StravaAuthDeps): StravaAuth {
         client_secret: deps.clientSecret,
         ...params,
       }),
+      signal: timeoutSignal(),
     });
     if (response.status === 400 || response.status === 401) {
       // Revoked or already-used grant: only a new authorization fixes it.

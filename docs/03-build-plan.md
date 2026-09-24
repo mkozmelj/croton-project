@@ -55,16 +55,16 @@ Concrete, sequential implementation checklist. Supersedes `spec.md` §13's phase
 - [x] `oauth_tokens` table + AES-256-GCM token encryption (`TOKEN_ENCRYPTION_KEY`) (ADR-011) — `src/integrations/oauth-crypto.ts`, `src/db/oauth-tokens.ts`; single-use states in `oauth_states`
 - [x] Strava OAuth flow with single-use `state` + token refresh that re-saves both tokens (`src/integrations/strava/oauth.ts`, `auth-routes.ts`, ADR-011) — the bot's `/connect` mints the state and sends the link
 - [x] Strava webhook handler: verify-token handshake, `subscription_id`/`owner_id` check, 200 within 2s + async processing, re-fetch activity via API (ADR-012), upsert-by-`external_id` (ADR-009) — no plain inserts. Subscription via `npm run strava:subscribe`
-- [x] Terra webhook handler: HMAC check on the raw body (ADR-012), upsert-by-`date` (ADR-009)
+- [x] ~~Terra webhook handler~~ → **Intervals.icu wellness sync** (ADR-015: Terra is no longer free): hourly `node-cron` job pulls the last 3 days of Garmin wellness data, upsert-by-`date` (ADR-009), one Telegram alert per failure streak
 - [x] Full schema: `activities`, `health_metrics`, `athlete_profile` (without `race_calendar`), `events`, `goals` (ADR-010, incl. the one-active-A-goal-per-season partial unique index) — migration `drizzle/0001_phase2_data_layer.sql`
 - [x] Activity-summary flow (Haiku, no thinking per ADR-005) → Telegram notification — summarized once per new activity, plain-text fallback when over budget
 - [x] `/status` command
 - [x] Dynamic context block now gets appended to the system prompt (ADR-004's second array element) — re-verify caching still hits on the static portion after this change. **Verified 2026-09-24:** call 1 `cache_creation_input_tokens: 2298`, call 2 `cache_read_input_tokens: 2298`, with a fresh context block (~300 tokens) on each call.
-- [ ] Deploy + connect: set `TOKEN_ENCRYPTION_KEY` in Railway, deploy, `/connect` from Telegram, `npm run strava:subscribe -- create <APP_URL>`, set `STRAVA_SUBSCRIPTION_ID`, redeploy; Terra account + `TERRA_SIGNING_SECRET` (see the pricing check in ADR-012's notes first)
+- [ ] Deploy + connect: set `TOKEN_ENCRYPTION_KEY` in Railway, deploy, `/connect` from Telegram, `npm run strava:subscribe -- create <APP_URL>`, set `STRAVA_SUBSCRIPTION_ID`, redeploy; Intervals.icu: connect Garmin with "Download wellness data" on, set `INTERVALS_API_KEY` + `INTERVALS_ATHLETE_ID`
 
-**Acceptance:** A real Strava activity (or a simulated webhook payload in a test) produces a Telegram summary within seconds and a correctly-upserted DB row. Health metrics from Terra populate `health_metrics` without duplicate rows on webhook retry.
+**Acceptance:** A real Strava activity (or a simulated webhook payload in a test) produces a Telegram summary within seconds and a correctly-upserted DB row. Health metrics from Intervals.icu populate `health_metrics` without duplicate rows when the same days are synced again.
 
-**Manual steps needed:** spec.md §12.1 #8, §12.2 #9, #12, #13.
+**Manual steps needed:** spec.md §12.2 #9, plus an Intervals.icu account linked to Garmin Connect (replaces §12.1 #8 and §12.2 #12, #13, see ADR-015).
 
 ---
 

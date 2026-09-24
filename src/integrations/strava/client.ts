@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { timeoutSignal } from "../../utils/http.js";
 import { type StravaAuth, StravaAuthError } from "./oauth.js";
 
 const API_BASE = "https://www.strava.com/api/v3";
@@ -63,6 +64,7 @@ export function createStravaClient({
       const path = `/activities/${id}`;
       const response = await doFetch(`${API_BASE}${path}`, {
         headers: { authorization: `Bearer ${await auth.accessToken()}` },
+        signal: timeoutSignal(),
       });
       if (response.status === 404) return null;
       if (response.status === 401) throw new StravaAuthError("Strava rejected the access token");

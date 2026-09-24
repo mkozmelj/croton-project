@@ -54,9 +54,12 @@ const envSchema = z
     GOOGLE_CLIENT_ID: optionalSecret,
     GOOGLE_CLIENT_SECRET: optionalSecret,
     TOKEN_ENCRYPTION_KEY: encryptionKey,
-    TERRA_API_KEY: optionalSecret,
-    TERRA_DEV_ID: optionalSecret,
-    TERRA_SIGNING_SECRET: optionalSecret,
+    // ADR-015: health data from Intervals.icu (Settings → Developer Settings).
+    INTERVALS_API_KEY: optionalSecret,
+    INTERVALS_ATHLETE_ID: z
+      .string()
+      .regex(/^i?\d+$/, "the athlete id from Intervals.icu settings, e.g. i12345")
+      .optional(),
     OPENAI_API_KEY: optionalSecret,
   })
   .superRefine((value, ctx) => {

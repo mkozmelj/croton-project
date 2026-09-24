@@ -8,6 +8,7 @@ import type { BudgetLevel } from "../agent/budget.js";
 import type { ActivitySummary } from "../db/activities.js";
 import type { HealthMetrics } from "../db/health-metrics.js";
 import type { ModelSpend } from "../db/llm-usage.js";
+import { IntervalsApiError } from "../integrations/intervals/client.js";
 
 export const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
 
@@ -44,7 +45,7 @@ export function startText(chatId: number): string {
   return [
     "Hi, I'm your training coach.",
     "",
-    "I can chat about training: plans, workouts, pacing, recovery. I see your Strava activities and your Garmin/Apple Health data once they're connected. Calendar and weekly plans come in a later phase.",
+    "I can chat about training: plans, workouts, pacing, recovery. I see your Strava activities and your Garmin recovery data (via Intervals.icu) once they're connected. Calendar and weekly plans come in a later phase.",
     "",
     "Commands:",
     "/status - this week's training, recovery and budget",
@@ -166,28 +167,29 @@ export function activityFailureText(): string {
   return "Something broke while processing a Strava activity. It's logged; I'll look into it.";
 }
 
-export function terraUnparseableText(): string {
-  return "Received health data I couldn't read. It's logged; I'll look into it.";
-}
-
 export function serverFailureText(route: string): string {
-  const what = route.startsWith("/webhook/terra")
-    ? "storing health data (Terra will resend it)"
-    : route.startsWith("/webhook/strava")
-      ? "receiving a Strava update"
-      : route.startsWith("/auth/")
-        ? "connecting an account"
-        : `handling ${route}`;
+  const what = route.startsWith("/webhook/strava")
+    ? "receiving a Strava update"
+    : route.startsWith("/auth/")
+      ? "connecting an account"
+      : `handling ${route}`;
   return `Something broke while ${what}. It's logged; I'll look into it.`;
 }
 
-export function terraAuthText(
-  type: string,
-  status: string | null,
-  provider: string | null,
-): string {
-  const source = provider ?? "a device";
-  if (type === "auth" && status === "success") return `Health data connected: ${source}.`;
-  if (type === "user_reauth") return `Health data reconnected: ${source}.`;
-  return `Health data connection changed (${type}${status ? `, ${status}` : ""}) for ${source}. Check the Terra app.`;
+const JOB_DESCRIPTIONS: Record<string, string> = {
+  "intervals-wellness": "Fetching health data from Intervals.icu",
+};
+
+export function jobFailureText(jobName: string, error: unknown): string {
+  const what = JOB_DESCRIPTIONS[jobName] ?? `The ${jobName} job`;
+  const hint =
+    error instanceof IntervalsApiError && (error.status === 401 || error.status === 403)
+      ? " The API key was rejected; check INTERVALS_API_KEY."
+      : "";
+  return `${what} failed.${hint} It's logged; I'll retry every hour and tell you when it works again.`;
+}
+
+export function jobRecoveredText(jobName: string): string {
+  const what = JOB_DESCRIPTIONS[jobName] ?? `The ${jobName} job`;
+  return `${what} works again.`;
 }

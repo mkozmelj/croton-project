@@ -5,7 +5,6 @@ export const REDACT_PATHS = [
   "req.headers.authorization",
   'req.headers["x-api-key"]',
   'req.headers["x-telegram-bot-api-secret-token"]',
-  'req.headers["terra-signature"]',
   "*.access_token",
   "*.refresh_token",
   "*.authorization_token",

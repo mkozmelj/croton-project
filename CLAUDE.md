@@ -1,6 +1,6 @@
 # Croton Project — Training Agent
 
-Personal AI training coach for a single amateur multi-sport athlete. Telegram bot + Claude API + Strava/Google Calendar/Terra integrations, on a hard €20/month budget.
+Personal AI training coach for a single amateur multi-sport athlete. Telegram bot + Claude API + Strava/Google Calendar/Intervals.icu integrations, on a hard €20/month budget.
 
 **Read before touching code:** `spec.md` (vision, architecture, data model) → `docs/00-pre-implementation-review.md` (gaps/corrections) → `docs/02-architecture-decisions.md` (binding decisions — **wins over `spec.md` on conflict**) → `docs/03-build-plan.md` (the actual task list). `docs/01-stack-and-principles.md` has the per-technology conventions below in full detail.
 
@@ -10,12 +10,12 @@ Personal AI training coach for a single amateur multi-sport athlete. Telegram bo
 - **Model IDs are constants, never inline strings.** `MODELS.sonnet` = `claude-sonnet-5`, `MODELS.haiku` = `claude-haiku-4-5`, defined once in `src/config/env.ts`. See `docs/02-architecture-decisions.md` ADR-001.
 - **System prompt caching is structural, not optional.** Static training-principles content first (with `cache_control`, 1h TTL), dynamic athlete/session context appended after. Never interpolate anything dynamic before the cache breakpoint. ADR-004.
 - **`conversations.content` is `jsonb`, storing full Anthropic content-block arrays** — not summarized text. Needed to replay `tool_use`/`tool_result` correctly. ADR-003.
-- **Every webhook write is an upsert** (`onConflictDoUpdate`), never a plain insert — Strava and Terra both retry webhooks. ADR-009.
+- **Every webhook write is an upsert** (`onConflictDoUpdate`), never a plain insert — Strava retries webhooks and the Intervals.icu sync re-reads recent days. ADR-009.
 - **Telegram bot only responds to `TELEGRAM_AUTHORIZED_CHAT_ID`.** Everything else is silently dropped. ADR-006.
 - **No `any`.** Boundary data (webhook bodies, raw tool input) is `unknown`, narrowed with `zod` immediately.
 - **Secrets never enter git** — only `.env` (ignored) and Railway variables. Before every commit, check staged files for `.env`, tokens, passwords in connection strings, real chat IDs or health values. ADR-013.
 - **OAuth tokens live encrypted in the `oauth_tokens` table**, never env vars; OAuth flows use a single-use `state`. ADR-011.
-- **Every webhook is authenticated before it's parsed** (Telegram secret header, Strava verify token + subscription/owner check, Terra HMAC), timing-safe compare, reject path tested. ADR-012.
+- **Every webhook is authenticated before it's parsed** (Telegram secret header, Strava verify token + subscription/owner check), timing-safe compare, reject path tested. ADR-012.
 - **Literature corpus is open sources, athlete-scanned print copies, or notes only** — never DRM-stripped or pirated files. Source files stay in git-ignored `data/literature/`. ADR-014.
 - **`npm run check` (Biome + `tsc --noEmit` + Vitest) must pass before any commit touching `src/`.**
 
@@ -29,6 +29,6 @@ One module, one responsibility — no file both queries the DB and formats Teleg
 
 ## Current status
 
-Phase 0 done: private repo `mkozmelj/croton-project`, deployed on Railway at `https://croton-project-production.up.railway.app` (`/health` responds). Phase 1 done (bot + Claude wrapper + budget, deployed; prod webhook answers). Phase 2 code complete (Strava OAuth + webhook via REST, Terra webhook, full schema, activity summaries, `/status`, dynamic context); remaining: deploy, connect Strava, create the webhook subscription, and the Terra pricing check (ADR-012 notes). Use Node 24 (`nvm use`, reads `.nvmrc`).
+Phase 0 done: private repo `mkozmelj/croton-project`, deployed on Railway at `https://croton-project-production.up.railway.app` (`/health` responds). Phase 1 done (bot + Claude wrapper + budget, deployed; prod webhook answers). Phase 2 code complete (Strava OAuth + webhook via REST, Intervals.icu wellness sync (ADR-015), full schema, activity summaries, `/status`, dynamic context); remaining: deploy, connect Strava, create the webhook subscription, and set the Intervals.icu API key. Use Node 24 (`nvm use`, reads `.nvmrc`).
 
 Local dev (`npm run dev`, `NODE_ENV=development`) uses Telegram long polling, and grammy **deletes the registered webhook** when polling starts — so running dev with the prod bot token silently disconnects production until the next deploy. Use a separate dev bot from BotFather for local work.

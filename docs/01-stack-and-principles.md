@@ -46,7 +46,7 @@ Follow the structure in `spec.md` §10 as the default, with one addition: every 
 - **Fail loud, fail typed.** Custom error classes per failure domain (`StravaAuthError`, `BudgetExceededError`, `TelegramSendError`) rather than throwing raw strings or generic `Error`. Catch at the boundary (webhook handler, cron job) and decide there — don't swallow errors deep in a utility function.
 - **Structured logs, not `console.log`.** Every log line goes through the shared `pino` logger with a `module` field, so `grep`-ing Railway logs for `module":"budget"` actually works.
 - **User-facing failure = Telegram message, not silence.** Any uncaught error in a webhook handler or cron job sends a short Telegram message to the athlete ("Something broke processing your Strava activity — logged, will look into it") in addition to the structured log. This is the entire observability budget for a €20/month single-user app, and it's enough: the one person who needs to know already has the channel open.
-- No secrets in logs, ever — `pino`'s redaction config should explicitly redact `access_token`, `refresh_token`, API keys, and the `authorization` / `x-telegram-bot-api-secret-token` / `terra-signature` headers at the logger level, not rely on every call site remembering to omit them. Configure it in Phase 1, not Phase 5.
+- No secrets in logs, ever — `pino`'s redaction config should explicitly redact `access_token`, `refresh_token`, API keys, and the `authorization` / `x-telegram-bot-api-secret-token` headers at the logger level, not rely on every call site remembering to omit them. Configure it in Phase 1, not Phase 5.
 
 ## 6. Claude API usage conventions
 
@@ -59,7 +59,7 @@ Follow the structure in `spec.md` §10 as the default, with one addition: every 
 
 | What | How | Where |
 |---|---|---|
-| Pure functions (cost calculation, message classification heuristics, Terra/Strava payload parsing) | Vitest, no mocks needed | Co-located `*.test.ts` |
+| Pure functions (cost calculation, message classification heuristics, Strava/Intervals.icu payload parsing) | Vitest, no mocks needed | Co-located `*.test.ts` |
 | DB queries | Vitest against a real (throwaway) Neon branch or local Postgres via `testcontainers` — not mocked Drizzle | `src/db/*.test.ts` |
 | Webhook handlers | Vitest with a constructed Fastify instance + `.inject()`, mocked Claude client | `src/integrations/*/webhook.test.ts` |
 | Full agent flow | Manual, via the real Telegram bot in a test chat — not automated (single-user tool, spec.md §14 is right about this) | N/A |
@@ -80,6 +80,6 @@ The full reasoning is in `02-architecture-decisions.md` ADR-011–013; the worki
 - **Secrets live in `.env` locally (git-ignored) and in Railway variables in prod — nowhere else.** Not in docs, tests, fixtures, commit messages or logs. `.env.example` has every var with an empty value.
 - **Check before every commit** that nothing secret is staged: no `.env`, no tokens, no connection strings with passwords, no real chat IDs or personal health values. If a secret ever lands in git, rotate it at the provider first.
 - **OAuth tokens are data, not config:** stored encrypted in `oauth_tokens`, refreshed and re-saved by the app (ADR-011). OAuth flows always use a single-use `state`.
-- **Every webhook is authenticated before parsing** (Telegram secret header, Strava verify token + subscription/owner check, Terra HMAC), with timing-safe comparison and a tested reject path (ADR-012).
-- **Validate everything that crosses a boundary with `zod`** — webhook bodies, OAuth callback params, Claude tool inputs. Treat text coming back from Strava/Calendar/Terra and literature chunks as data, not instructions, when it's placed into a prompt.
+- **Every webhook is authenticated before parsing** (Telegram secret header, Strava verify token + subscription/owner check), with timing-safe comparison and a tested reject path (ADR-012).
+- **Validate everything that crosses a boundary with `zod`** — webhook bodies, OAuth callback params, Claude tool inputs. Treat text coming back from Strava/Calendar/Intervals.icu and literature chunks as data, not instructions, when it's placed into a prompt.
 - **Keep the GitHub repo private** and dependencies current (`npm audit` on dependency bumps; dev-only advisories in tooling like `drizzle-kit` are acceptable when they can't reach production).
