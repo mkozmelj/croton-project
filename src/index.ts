@@ -62,6 +62,7 @@ import { createStravaClient } from "./integrations/strava/client.js";
 import { createStravaAuth } from "./integrations/strava/oauth.js";
 import { registerStravaWebhook } from "./integrations/strava/webhook.js";
 import { connectionStringSecrets, createLogger } from "./logging/logger.js";
+import { registerInfoPages } from "./pages.js";
 import { type Job, type Scheduler, startScheduler } from "./scheduler/cron.js";
 import { buildServer } from "./server.js";
 import { createBackgroundTasks } from "./utils/background.js";
@@ -142,6 +143,7 @@ const app = buildServer({
   logger,
   onServerError: (route) => notifier.notify(serverFailureText(route)),
 });
+registerInfoPages(app);
 if (transport.mode === "webhook") {
   registerTelegramWebhook(app, { bot, secretToken: transport.secretToken });
 }
