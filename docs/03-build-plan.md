@@ -14,7 +14,7 @@ Concrete, sequential implementation checklist. Supersedes `spec.md` §13's phase
 - [x] `drizzle.config.ts` pointing at Neon
 - [x] `.env.example` with every var from spec.md §9.3, plus `TELEGRAM_AUTHORIZED_CHAT_ID` (ADR-006), `DISABLE_THINKING` (ADR-005), `STRAVA_WEBHOOK_VERIFY_TOKEN` (ADR-012), `TOKEN_ENCRYPTION_KEY` (ADR-011) — and without the per-user OAuth token vars (ADR-011)
 - [x] `npm run check` script: `biome check && tsc --noEmit && vitest run`
-- [ ] GitHub repo created (private — ADR-013), Railway connected, auto-deploy on `main` confirmed working with a placeholder `/health` endpoint
+- [x] GitHub repo created (private — ADR-013), Railway connected, auto-deploy on `main` confirmed working with a placeholder `/health` endpoint
 - [x] `CLAUDE.md` in place (see project root)
 - [x] `.gitignore` covering `.env*`, `node_modules/`, `dist/`; secrets check before the first commit (ADR-013)
 

@@ -28,4 +28,4 @@ One module, one responsibility — no file both queries the DB and formats Teleg
 
 ## Current status
 
-Phase 0 (repo bootstrap) done locally: tooling, `/health` server, `.env.example`, `railway.json`. Remaining for Phase 0: first push to the private GitHub repo and confirming the Railway deploy. Then Phase 1. Use Node 24 (`nvm use`, reads `.nvmrc`).
+Phase 0 done: private repo `mkozmelj/croton-project`, deployed on Railway at `https://croton-project-production.up.railway.app` (`/health` responds). Next step is `docs/03-build-plan.md` Phase 1. Use Node 24 (`nvm use`, reads `.nvmrc`).
