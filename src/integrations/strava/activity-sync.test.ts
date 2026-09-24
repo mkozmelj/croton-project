@@ -72,6 +72,14 @@ describe("createStravaActivitySync().handle", () => {
     expect(newActivities).toHaveLength(1);
   });
 
+  it("stores an unknown activity from an update event without announcing it", async () => {
+    // e.g. the athlete renames an activity from before Strava was connected.
+    const { sync, rows, newActivities } = setup();
+    await sync.handle(event({ aspect_type: "update", updates: { title: "Renamed" } }));
+    expect([...rows.keys()]).toEqual(["111"]);
+    expect(newActivities).toEqual([]);
+  });
+
   it("deletes the stored activity on a delete event without fetching", async () => {
     const { sync, rows, fetchedIds } = setup();
     await sync.handle(event());

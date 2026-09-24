@@ -9,7 +9,7 @@ type SyncDeps = {
   client: StravaClient;
   activities: Pick<ActivityStore, "upsert" | "deleteByExternalId">;
   tokens: Pick<OAuthTokenStore, "remove">;
-  // Called once per newly stored activity — not on updates or webhook retries.
+  // Called once per newly uploaded activity — not on updates or webhook retries.
   onNewActivity: (activity: Activity) => Promise<void>;
   onDeauthorized: () => Promise<void>;
   logger: Logger;
@@ -49,7 +49,9 @@ export function createStravaActivitySync(deps: SyncDeps): StravaActivitySync {
       }
       const { activity, inserted } = await deps.activities.upsert(activityFromStrava(fetched));
       log.info({ externalId, aspect: event.aspect_type, inserted }, "activity stored");
-      if (inserted) await deps.onNewActivity(activity);
+      // An update can insert too (an edit to an activity from before Strava was connected);
+      // only a fresh upload is announced.
+      if (inserted && event.aspect_type === "create") await deps.onNewActivity(activity);
     },
   };
 }
