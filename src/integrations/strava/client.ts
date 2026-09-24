@@ -50,6 +50,14 @@ export type FetchedActivity = { activity: StravaActivity; raw: unknown };
 export type StravaClient = {
   // Null when the activity no longer exists or isn't visible with the granted scope.
   getActivity(id: number): Promise<FetchedActivity | null>;
+  // One page of the athlete's activities started after `after`, oldest first. Summary
+  // records: no laps or description (those only come from getActivity). `pageLength` counts
+  // every entry on the page, including any skipped as unparseable (for paging).
+  listActivities(
+    after: Date,
+    page: number,
+    perPage: number,
+  ): Promise<{ items: FetchedActivity[]; pageLength: number }>;
 };
 
 export function createStravaClient({
@@ -59,18 +67,41 @@ export function createStravaClient({
   auth: Pick<StravaAuth, "accessToken">;
   fetch?: typeof fetch;
 }): StravaClient {
+  async function get(path: string): Promise<Response> {
+    const response = await doFetch(`${API_BASE}${path}`, {
+      headers: { authorization: `Bearer ${await auth.accessToken()}` },
+      signal: timeoutSignal(),
+    });
+    if (response.status === 401) throw new StravaAuthError("Strava rejected the access token");
+    return response;
+  }
+
   return {
     async getActivity(id) {
       const path = `/activities/${id}`;
-      const response = await doFetch(`${API_BASE}${path}`, {
-        headers: { authorization: `Bearer ${await auth.accessToken()}` },
-        signal: timeoutSignal(),
-      });
+      const response = await get(path);
       if (response.status === 404) return null;
-      if (response.status === 401) throw new StravaAuthError("Strava rejected the access token");
       if (!response.ok) throw new StravaApiError(response.status, path);
       const raw: unknown = await response.json();
       return { activity: stravaActivitySchema.parse(raw), raw };
+    },
+
+    async listActivities(after, page, perPage) {
+      const query = new URLSearchParams({
+        after: String(Math.floor(after.getTime() / 1000)),
+        page: String(page),
+        per_page: String(perPage),
+      });
+      const path = `/athlete/activities?${query}`;
+      const response = await get(path);
+      if (!response.ok) throw new StravaApiError(response.status, "/athlete/activities");
+      const items = z.array(z.unknown()).parse(await response.json());
+      // An entry that doesn't parse (an odd manual activity) is skipped, not fatal.
+      const parsed = items.flatMap((raw) => {
+        const result = stravaActivitySchema.safeParse(raw);
+        return result.success ? [{ activity: result.data, raw }] : [];
+      });
+      return { items: parsed, pageLength: items.length };
     },
   };
 }

@@ -6,7 +6,7 @@ import { activityFromStrava } from "./mapper.js";
 import type { StravaEvent } from "./webhook.js";
 
 type SyncDeps = {
-  client: StravaClient;
+  client: Pick<StravaClient, "getActivity">;
   activities: Pick<ActivityStore, "upsert" | "deleteByExternalId">;
   tokens: Pick<OAuthTokenStore, "remove">;
   // Called once per newly uploaded activity — not on updates or webhook retries.

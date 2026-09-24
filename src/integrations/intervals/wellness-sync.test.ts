@@ -34,3 +34,23 @@ describe("createWellnessSync().syncRecent", () => {
     expect(upserts.map((update) => update.date)).toEqual(["2026-09-22", "2026-09-24"]);
   });
 });
+
+describe("createWellnessSync().backfill", () => {
+  it("reads the requested number of days", async () => {
+    const ranges: [string, string][] = [];
+    const sync = createWellnessSync({
+      client: {
+        wellness: async (oldest, newest) => {
+          ranges.push([oldest, newest]);
+          return [{ id: "2026-07-01", weight: 70.5, bodyFat: 15 }];
+        },
+      },
+      health: { upsert: async () => {} },
+      timeZone: "Europe/Ljubljana",
+      logger: pino({ level: "silent" }),
+      now: () => new Date("2026-09-24T10:00:00Z"),
+    });
+    expect(await sync.backfill(90)).toEqual(["2026-07-01"]);
+    expect(ranges).toEqual([["2026-06-27", "2026-09-24"]]);
+  });
+});

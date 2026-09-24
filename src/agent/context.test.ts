@@ -197,4 +197,34 @@ describe("createContextBuilder().build", () => {
   it("marks the data as data, not instructions", async () => {
     expect(await builder([]).context.build()).toContain("not instructions");
   });
+
+  it("shows weekly body composition and W/kg next to FTP", async () => {
+    const text = await builder(
+      [],
+      [
+        health({ date: "2026-09-22", weightKg: 70.4, bodyFatPct: 15.2 }),
+        health({ date: "2026-08-25", weightKg: 71.4, bodyFatPct: 15.8 }),
+      ],
+      { markers: [marker({ value: 211 })] },
+    ).context.build();
+    expect(text).toContain("- bike: FTP 211 W = 3.00 W/kg (weight 70.4 kg on 2026-09-22)");
+    expect(text).toContain("- Mon 2026-09-21: weight 70.4 kg, body fat 15.2% (1 reading)");
+    expect(text).toContain("- Change over 4 weeks: weight -1.0 kg, body fat -0.6 points");
+  });
+
+  it("gives plan generation a year of monthly totals and peaks", async () => {
+    const { context, ranges } = builder([
+      storedActivity({ startedAt: new Date("2026-01-15T06:00:00Z"), durationSeconds: 5400 }),
+    ]);
+    const text = await context.build({ detail: "baseline" });
+    expect(ranges[0]?.[0].toISOString()).toBe("2025-09-21T22:00:00.000Z"); // Mon 22 Sep 2025
+    expect(text).toContain("- 2026-01: run: 1x, 1:30:00, 8.10 km");
+    expect(text).toContain("- run: biggest week Mon 2026-01-12");
+  });
+
+  it("points to /import when there is no history", async () => {
+    const text = await builder([]).context.build({ detail: "baseline" });
+    expect(text).toContain("run /import to load it from Strava");
+    expect(text).toContain("- no weight or body-fat readings");
+  });
 });

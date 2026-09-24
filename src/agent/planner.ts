@@ -31,6 +31,9 @@ type PlannerDeps = {
   conversations: Pick<ConversationStore, "append">;
   pending: Pick<PendingActionStore, "create" | "clear">;
   calendar: CalendarContext;
+  // Re-reads thresholds from Intervals.icu so a change made since the last weekly check is
+  // in the plan. Best effort: a failure is logged and planning goes on.
+  refreshThresholds?: () => Promise<unknown>;
   chatId: number;
   timeZone: string;
   logger: Logger;
@@ -80,6 +83,9 @@ export function createPlanner(deps: PlannerDeps): Planner {
       const today = localDate(instant, deps.timeZone);
       const target = requested ?? planTargetWeek(today);
       const end = addDays(target, 6);
+      await deps.refreshThresholds?.().catch((error: unknown) => {
+        log.warn({ err: error }, "threshold refresh before planning failed, using stored values");
+      });
       const [context, calendar] = await Promise.all([
         deps.context.build({ detail: "baseline", planWeek: target }),
         deps.calendar.weekLines(target),

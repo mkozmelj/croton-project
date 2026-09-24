@@ -16,6 +16,15 @@ import type { ModelSpend } from "../db/llm-usage.js";
 import { IntervalsApiError } from "../integrations/intervals/client.js";
 import { parseBackground } from "../training/background.js";
 import {
+  type BodyReading,
+  bodyChange,
+  describeBodyChange,
+  describeBodyWeek,
+  latestWeight,
+  wattsPerKg,
+  weeklyBody,
+} from "../training/body.js";
+import {
   describeAge,
   describeSource,
   formatMarkerValue,
@@ -25,6 +34,7 @@ import {
 import { weeksAndDaysUntil } from "../training/phase.js";
 import { sortedWorkouts, type WeekPlan } from "../training/plan.js";
 import { describeZones } from "../training/zones.js";
+import type { ImportSummary } from "./commands.js";
 
 export const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
 
@@ -71,6 +81,7 @@ export function startText(chatId: number, offerOnboarding: boolean): string {
     "/profile - fitness markers, zones and background",
     "/onboard - tell me about your training background",
     "/status - this week's training, recovery and budget",
+    "/import - load 12 months of Strava history (once, after connecting)",
     "/connect - link Strava or Google Calendar",
     "/budget - LLM spend this month",
   ];
@@ -258,6 +269,9 @@ export function goalsText(season: SeasonView, today: string): string {
 type ProfileSummary = {
   profile: AthleteProfile | null;
   markers: readonly StoredMarker[];
+  // Weight/body-fat readings, 8 weeks back from this week's Monday (`bodyFrom`).
+  body: readonly BodyReading[];
+  bodyFrom: string;
   recentSports: readonly string[];
   season: SeasonView;
   today: string;
@@ -266,6 +280,8 @@ type ProfileSummary = {
 export function profileText({
   profile,
   markers,
+  body,
+  bodyFrom,
   recentSports,
   season,
   today,
@@ -283,6 +299,21 @@ export function profileText({
       `- ${missing.sport}: no threshold yet, I'll plan by RPE and schedule ${missing.fieldTest}`,
     );
   }
+
+  const ftp = markers.find((m) => m.sport === "bike" && m.metric === "ftp_w");
+  const weight = latestWeight(body, today);
+  if (ftp && weight) {
+    lines.push(
+      `- bike: ${wattsPerKg(ftp.value, weight.weightKg).toFixed(2)} W/kg (weight ${weight.weightKg.toFixed(1)} kg on ${weight.date})`,
+    );
+  }
+
+  const weeks = weeklyBody(body, bodyFrom, 8);
+  const change = bodyChange(weeks);
+  lines.push("", "Body composition (weekly averages):");
+  if (weeks.length === 0) lines.push("- no readings yet");
+  for (const week of weeks.slice(-4)) lines.push(`- ${describeBodyWeek(week)}`);
+  if (change) lines.push(`- ${describeBodyChange(change)}`);
 
   const zones = describeZones(profile?.sportZones);
   lines.push("", "Zones:", ...(zones.length > 0 ? zones.map((z) => `- ${z}`) : ["- none yet"]));
@@ -320,4 +351,23 @@ export function tomorrowText(plan: WeekPlan | null, tomorrow: string): string {
   if (!plan) return `No confirmed plan covers tomorrow (${tomorrow}). Send /recap to make one.`;
   if (sessions.length === 0) return `Tomorrow (${tomorrow}) is a rest day.`;
   return sessions.map(workoutDetail).join("\n\n");
+}
+
+export function importText(summary: ImportSummary): string {
+  const lines = ["History import:"];
+  const { activities, wellnessDays } = summary;
+  if (activities === null) lines.push("- Strava: not connected (/connect strava)");
+  else if (activities === "failed")
+    lines.push("- Strava: failed, it's logged. Try /import again later.");
+  else {
+    lines.push(
+      `- Strava: ${activities.fetched} activities from the last 12 months, ${activities.inserted} new`,
+    );
+  }
+  if (wellnessDays === null) lines.push("- Intervals.icu: not configured");
+  else if (wellnessDays === "failed")
+    lines.push("- Intervals.icu: failed, it's logged. Try /import again later.");
+  else lines.push(`- Intervals.icu: ${wellnessDays} days of wellness data (last 90 days)`);
+  lines.push("", "Running it again only fills gaps; nothing is duplicated.");
+  return lines.join("\n");
 }

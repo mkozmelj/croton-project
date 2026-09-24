@@ -7,6 +7,15 @@ import type { PendingActionStore } from "../db/pending-actions.js";
 import type { TrainingPlanStore } from "../db/training-plans.js";
 import { parseBackground } from "../training/background.js";
 import {
+  type BodyReading,
+  bodyChange,
+  describeBodyChange,
+  describeBodyWeek,
+  latestWeight,
+  wattsPerKg,
+  weeklyBody,
+} from "../training/body.js";
+import {
   describeAge,
   describeSource,
   formatMarkerValue,
@@ -26,6 +35,7 @@ import {
   totalsBySport,
 } from "./activity-format.js";
 import type { FitnessService } from "./fitness.js";
+import { historyStart, monthlyLines, peakLines } from "./history-summary.js";
 import { planLines } from "./plan-format.js";
 import { loadSeason } from "./season.js";
 
@@ -35,6 +45,8 @@ const HEALTH_DAYS = 7;
 // ADR-016: anchors are required for sports trained in this window; plan generation also
 // gets per-week totals and the load trend over it.
 const BASELINE_WEEKS = 6;
+// Weekly body-composition averages shown (this week included).
+const BODY_WEEKS = 8;
 
 type ContextDeps = {
   profile: Pick<AthleteProfileStore, "get">;
@@ -74,13 +86,16 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
       const lastWeek = addDays(thisWeek, -7);
       const nextWeek = addDays(thisWeek, 7);
       const baselineFrom = addDays(thisWeek, -7 * BASELINE_WEEKS);
+      const bodyFrom = addDays(thisWeek, -7 * (BODY_WEEKS - 1));
       const listFrom = addDays(today, -(ACTIVITY_DAYS - 1));
+      // Plan generation also gets the year behind (monthly totals and peaks).
+      const activitiesFrom = options.detail === "baseline" ? historyStart(thisWeek) : baselineFrom;
 
       const [profile, activities, health, markers, season, thisPlan, nextPlan, pending] =
         await Promise.all([
           deps.profile.get(),
-          deps.activities.between(localMidnight(baselineFrom, deps.timeZone), instant),
-          deps.health.since(baselineFrom),
+          deps.activities.between(localMidnight(activitiesFrom, deps.timeZone), instant),
+          deps.health.since(bodyFrom < baselineFrom ? bodyFrom : baselineFrom),
           deps.fitness.latest(),
           loadSeason(deps.goals, today),
           deps.plans.forWeek(thisWeek),
@@ -100,7 +115,12 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
           : ["- nothing logged"];
       };
       const recent = activities.filter((a) => dayOf(a.startedAt) >= listFrom);
-      const baselineActivities = activities.filter((a) => dayOf(a.startedAt) < thisWeek);
+      const baselineActivities = activities.filter((a) => dayOf(a.startedAt) >= baselineFrom);
+      const bodyReadings = health.map((h) => ({
+        date: h.date,
+        weightKg: h.weightKg,
+        bodyFatPct: h.bodyFatPct,
+      }));
 
       const lines = [
         "CURRENT CONTEXT",
@@ -112,7 +132,8 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
         "",
         `FITNESS MARKERS (current values; stale after ${staleAfterWeeks(season.phase)} weeks in this phase)`,
         ...markerLines(markers, today, season.phase),
-        ...anchorLines(markers, baselineActivities.concat(inWeek(thisWeek))),
+        ...powerToWeightLines(markers, bodyReadings, today),
+        ...anchorLines(markers, baselineActivities),
         "",
         "TRAINING ZONES (use these for every target; never invent zones)",
         ...orNone(
@@ -147,8 +168,25 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
               ...baselineLines(baselineFrom, inWeek),
               "",
               ...loadTrendLines(health, baselineFrom),
+              "",
+              "LAST 12 MONTHS, per-sport totals by month (oldest first; months without activity left out)",
+              ...orNone(
+                monthlyLines(
+                  activities.filter((a) => dayOf(a.startedAt) < thisWeek),
+                  (a) => dayOf(a.startedAt),
+                ),
+                "- no history (run /import to load it from Strava)",
+              ),
+              "PEAKS, LAST 12 MONTHS",
+              ...orNone(
+                peakLines(activities, (a) => dayOf(a.startedAt)),
+                "- none",
+              ),
             ]
           : ["", ...loadLines(health)]),
+        "",
+        `BODY COMPOSITION, weekly averages over ${BODY_WEEKS} weeks (judge the trend, not single days)`,
+        ...bodyLines(bodyReadings, bodyFrom),
         "",
         `ACTIVITIES, LAST ${ACTIVITY_DAYS} DAYS (from Strava)`,
         ...orNone(
@@ -173,6 +211,32 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
 }
 
 const orNone = (lines: string[], none: string) => (lines.length > 0 ? lines : [none]);
+
+function bodyLines(readings: readonly BodyReading[], from: string): string[] {
+  const weeks = weeklyBody(readings, from, BODY_WEEKS);
+  const change = bodyChange(weeks);
+  return orNone(
+    [
+      ...weeks.map((week) => `- ${describeBodyWeek(week)}`),
+      ...(change ? [`- ${describeBodyChange(change)}`] : []),
+    ],
+    "- no weight or body-fat readings",
+  );
+}
+
+// W/kg next to FTP, from the newest weight reading (at most a month old).
+function powerToWeightLines(
+  markers: readonly StoredMarker[],
+  readings: readonly BodyReading[],
+  today: string,
+): string[] {
+  const ftp = markers.find((m) => m.sport === "bike" && m.metric === "ftp_w");
+  const weight = latestWeight(readings, today);
+  if (!ftp || !weight) return [];
+  return [
+    `- bike: FTP ${Math.round(ftp.value)} W = ${wattsPerKg(ftp.value, weight.weightKg).toFixed(2)} W/kg (weight ${weight.weightKg.toFixed(1)} kg on ${weight.date})`,
+  ];
+}
 
 function profileLines(profile: AthleteProfile | null): string[] {
   if (!profile) return ["- Not set up yet. Offer /onboard."];

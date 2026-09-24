@@ -43,6 +43,7 @@ const message = (text: string, stop: Message["stop_reason"] = "end_turn") =>
 function setup(
   reply: Message,
   calendarLines: string[] | null = ['- Tue 29 Sep 09:00-17:00: "Work"'],
+  refreshThresholds?: () => Promise<unknown>,
 ) {
   const calls: ClaudeRequest[] = [];
   const contexts: unknown[] = [];
@@ -64,6 +65,7 @@ function setup(
     conversations,
     pending: pending.store,
     calendar: { weekLines: async () => calendarLines },
+    ...(refreshThresholds ? { refreshThresholds } : {}),
     chatId: 1,
     timeZone: "Europe/Ljubljana",
     logger: pino({ level: "silent" }),
@@ -128,5 +130,19 @@ describe("createPlanner", () => {
   it("passes a cut-off reply through instead of parsing it", async () => {
     const { planner } = setup(message('{"recap": "Solid', "max_tokens"));
     expect((await planner.generate({ feedback: "ok" })).text).toContain("cut off");
+  });
+
+  it("refreshes thresholds before planning and still plans when that fails", async () => {
+    let refreshed = 0;
+    const ok = setup(message(JSON.stringify(output)), null, async () => {
+      refreshed++;
+    });
+    await ok.planner.generate({ feedback: "ok" });
+    expect(refreshed).toBe(1);
+
+    const failing = setup(message(JSON.stringify(output)), null, async () => {
+      throw new Error("intervals down");
+    });
+    expect((await failing.planner.generate({ feedback: "ok" })).proposals).toHaveLength(1);
   });
 });

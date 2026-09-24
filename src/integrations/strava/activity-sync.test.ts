@@ -18,7 +18,7 @@ function setup(fetched = stravaActivity() as ReturnType<typeof stravaActivity> |
     expiresAt: new Date(),
     scope: null,
   });
-  const client: StravaClient = {
+  const client: Pick<StravaClient, "getActivity"> = {
     getActivity: async (id) => {
       fetchedIds.push(id);
       return fetched ? { activity: fetched, raw: fetched } : null;

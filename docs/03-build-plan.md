@@ -103,6 +103,16 @@ Concrete, sequential implementation checklist. Supersedes `spec.md` §13's phase
 
 ---
 
+### Phase 3 follow-ups (2026-09-24)
+
+- [x] `intervals-profile` weekly (Sunday 18:30) + on boot + refreshed before each plan generation (ADR-016 notes)
+- [x] Body composition from the Intervals.icu wellness fields (iOS Shortcut): weekly averages and 4-week change in the context and `/profile`, W/kg next to FTP (ADR-015 note)
+- [x] `/import`: 12 months of Strava activities (insert-only, no notifications) + 90 days of wellness; plan generation gets 12 months of monthly totals and peaks per sport
+
+**After deploying:** send `/import` once and check that `/profile` shows the body-composition weeks and W/kg.
+
+---
+
 ## Phase 4: Intelligence
 
 **Goal:** Same as spec.md §13 Phase 4, with corpus sourcing and ingestion per ADR-014. The books have no DRM-free ebook editions, so the pipeline is built and validated on the open corpus first, and scanned books are added afterwards.

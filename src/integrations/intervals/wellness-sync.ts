@@ -19,27 +19,29 @@ type WellnessSyncDeps = {
 export type WellnessSync = {
   // Pulls the last few days and upserts them (ADR-009). Returns the dates stored.
   syncRecent(): Promise<string[]>;
+  // Same for the last `days` days: the one-time history import, safe to repeat.
+  backfill(days: number): Promise<string[]>;
 };
 
 export function createWellnessSync(deps: WellnessSyncDeps): WellnessSync {
   const log = deps.logger.child({ module: "intervals-sync" });
   const now = deps.now ?? (() => new Date());
 
+  async function sync(days: number): Promise<string[]> {
+    const today = localDate(now(), deps.timeZone);
+    const records = await deps.client.wellness(addDays(today, -(days - 1)), today);
+    const stored: string[] = [];
+    for (const update of records.map(healthUpdateFromWellness)) {
+      if (!hasHealthValues(update)) continue;
+      await deps.health.upsert(update);
+      stored.push(update.date);
+    }
+    log.info({ days: stored.length, from: stored[0], to: stored.at(-1) }, "wellness synced");
+    return stored;
+  }
+
   return {
-    async syncRecent() {
-      const today = localDate(now(), deps.timeZone);
-      const records = await deps.client.wellness(
-        addDays(today, -(WELLNESS_LOOKBACK_DAYS - 1)),
-        today,
-      );
-      const stored: string[] = [];
-      for (const update of records.map(healthUpdateFromWellness)) {
-        if (!hasHealthValues(update)) continue;
-        await deps.health.upsert(update);
-        stored.push(update.date);
-      }
-      log.info({ days: stored }, "wellness synced");
-      return stored;
-    },
+    syncRecent: () => sync(WELLNESS_LOOKBACK_DAYS),
+    backfill: (days) => sync(days),
   };
 }

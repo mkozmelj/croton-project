@@ -21,6 +21,7 @@ import {
   budgetText,
   connectText,
   goalsText,
+  importText,
   onboardingIntroText,
   planCommandText,
   profileText,
@@ -38,10 +39,22 @@ export const COMMANDS = [
   { command: "profile", description: "Fitness markers, zones, background" },
   { command: "onboard", description: "Tell me about your training background" },
   { command: "status", description: "This week's training, recovery and budget" },
+  { command: "import", description: "Load 12 months of Strava history" },
   { command: "connect", description: "Link Strava or Google Calendar" },
   { command: "budget", description: "LLM spend this month" },
   { command: "start", description: "Welcome and setup info" },
 ] as const;
+
+// History pulled by /import: a year of activities for the long view in plan generation, and
+// 90 days of wellness for HRV, resting HR, weight and CTL baselines.
+export const IMPORT_ACTIVITY_DAYS = 365;
+export const IMPORT_WELLNESS_DAYS = 90;
+
+// null: that source isn't configured.
+export type ImportSummary = {
+  activities: { fetched: number; inserted: number } | null | "failed";
+  wellnessDays: number | null | "failed";
+};
 
 // One per configured OAuth provider (client id/secret + encryption key present).
 export type ConnectDeps = {
@@ -62,6 +75,7 @@ export type CommandDeps = {
   pending: Pick<PendingActionStore, "live">;
   planner: Pick<Planner, "startRecap" | "generate">;
   onboarding: Pick<Orchestrator, "startOnboarding">;
+  importHistory: () => Promise<ImportSummary>;
   connect: Partial<Record<OAuthProvider, ConnectDeps>>;
   monthlyBudgetEur: number;
   timeZone: string;
@@ -203,21 +217,30 @@ export function registerCommands(bot: Bot, deps: CommandDeps): void {
   bot.command("profile", async (ctx) => {
     const instant = now();
     const day = localDate(instant, deps.timeZone);
-    const [profile, markers, season, recent] = await Promise.all([
+    const bodyFrom = addDays(weekStart(day), -7 * 7);
+    const [profile, markers, season, recent, health] = await Promise.all([
       deps.profile.get(),
       deps.fitness.latest(),
       loadSeason(deps.goals, day),
       deps.activities.between(localMidnight(addDays(day, -42), deps.timeZone), instant),
+      deps.health.since(bodyFrom),
     ]);
     await ctx.reply(
       profileText({
         profile,
         markers,
+        body: health.map((h) => ({ date: h.date, weightKg: h.weightKg, bodyFatPct: h.bodyFatPct })),
+        bodyFrom,
         recentSports: recent.map((a) => a.sport),
         season,
         today: day,
       }),
     );
+  });
+
+  bot.command("import", async (ctx) => {
+    await ctx.reply("Importing your history. This takes up to a minute…");
+    await ctx.reply(importText(await withTyping(ctx, deps.importHistory)));
   });
 
   bot.command("onboard", async (ctx) => {

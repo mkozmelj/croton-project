@@ -11,7 +11,12 @@ import { createOrchestrator } from "./agent/orchestrator.js";
 import { createPlanBooking } from "./agent/plan-booking.js";
 import { createPlanner } from "./agent/planner.js";
 import { createToolHandlers } from "./agent/tool-handlers.js";
-import type { ConnectDeps } from "./bot/commands.js";
+import {
+  type ConnectDeps,
+  IMPORT_ACTIVITY_DAYS,
+  IMPORT_WELLNESS_DAYS,
+  type ImportSummary,
+} from "./bot/commands.js";
 import {
   activityFailureText,
   budgetAlertText,
@@ -49,8 +54,8 @@ import {
   createIntervalsClient,
   intervalsBasicCredentials,
 } from "./integrations/intervals/client.js";
-import { createProfileSync } from "./integrations/intervals/profile-sync.js";
-import { createWellnessSync } from "./integrations/intervals/wellness-sync.js";
+import { createProfileSync, type ProfileSync } from "./integrations/intervals/profile-sync.js";
+import { createWellnessSync, type WellnessSync } from "./integrations/intervals/wellness-sync.js";
 import { createTokenCipher } from "./integrations/oauth-crypto.js";
 import { createStravaActivitySync } from "./integrations/strava/activity-sync.js";
 import {
@@ -59,7 +64,11 @@ import {
   STRAVA_AUTH_START_PATH,
 } from "./integrations/strava/auth-routes.js";
 import { createStravaClient } from "./integrations/strava/client.js";
-import { createStravaAuth } from "./integrations/strava/oauth.js";
+import {
+  createStravaHistoryImport,
+  type StravaHistoryImport,
+} from "./integrations/strava/history-import.js";
+import { createStravaAuth, StravaAuthError } from "./integrations/strava/oauth.js";
 import { registerStravaWebhook } from "./integrations/strava/webhook.js";
 import { connectionStringSecrets, createLogger } from "./logging/logger.js";
 import { registerInfoPages } from "./pages.js";
@@ -183,18 +192,66 @@ if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && tokens) {
 const calendar = async () =>
   calendarClient && (await connect.google?.isConnected()) ? calendarClient : null;
 
+const jobs: Job[] = [];
+let wellness: WellnessSync | undefined;
+let profileSync: ProfileSync | undefined;
+if (env.INTERVALS_API_KEY && env.INTERVALS_ATHLETE_ID) {
+  const intervalsClient = createIntervalsClient({
+    apiKey: env.INTERVALS_API_KEY,
+    athleteId: env.INTERVALS_ATHLETE_ID,
+  });
+  const wellnessSync = createWellnessSync({
+    client: intervalsClient,
+    health,
+    timeZone: env.TIMEZONE,
+    logger,
+  });
+  // ADR-015: hourly while awake, so the morning's sleep/HRV shows up soon after the watch syncs.
+  jobs.push({
+    name: "intervals-wellness",
+    cron: "15 6-22 * * *",
+    runOnStart: true,
+    run: async () => {
+      await wellnessSync.syncRecent();
+    },
+  });
+  const intervalsProfile = createProfileSync({
+    client: intervalsClient,
+    markers,
+    fitness,
+    timeZone: env.TIMEZONE,
+    logger,
+  });
+  // ADR-016: thresholds change rarely, and only plans use them: weekly, half an hour before
+  // the Sunday recap, plus on boot (the planner also refreshes them before each plan).
+  jobs.push({
+    name: "intervals-profile",
+    cron: "30 18 * * 0",
+    runOnStart: true,
+    run: async () => {
+      await intervalsProfile.sync();
+    },
+  });
+  wellness = wellnessSync;
+  profileSync = intervalsProfile;
+} else {
+  logger.info({ module: "intervals" }, "Intervals.icu disabled (API key or athlete id unset)");
+}
+
 const planner = createPlanner({
   claude,
   context,
   conversations,
   pending,
   calendar: createCalendarContext({ calendar, timeZone: env.TIMEZONE, logger }),
+  ...(profileSync ? { refreshThresholds: profileSync.sync } : {}),
   chatId,
   timeZone: env.TIMEZONE,
   logger,
 });
 const fieldTests = createFieldTestProposer({ plans, pending, chatId, timeZone: env.TIMEZONE });
 
+let stravaImport: StravaHistoryImport | undefined;
 if (env.STRAVA_CLIENT_ID && env.STRAVA_CLIENT_SECRET && tokens) {
   const auth = createStravaAuth({
     clientId: env.STRAVA_CLIENT_ID,
@@ -213,10 +270,13 @@ if (env.STRAVA_CLIENT_ID && env.STRAVA_CLIENT_SECRET && tokens) {
     isConnected: async () => (await auth.athleteId()) !== null,
   };
 
+  const stravaClient = createStravaClient({ auth });
+  stravaImport = createStravaHistoryImport({ client: stravaClient, activities, logger });
+
   if (env.STRAVA_WEBHOOK_VERIFY_TOKEN) {
     const summarizer = createActivitySummarizer({ claude, context, timeZone: env.TIMEZONE });
     const sync = createStravaActivitySync({
-      client: createStravaClient({ auth }),
+      client: stravaClient,
       activities,
       tokens,
       onNewActivity: async (activity) => {
@@ -248,47 +308,6 @@ if (env.STRAVA_CLIENT_ID && env.STRAVA_CLIENT_SECRET && tokens) {
   );
 }
 
-const jobs: Job[] = [];
-if (env.INTERVALS_API_KEY && env.INTERVALS_ATHLETE_ID) {
-  const intervalsClient = createIntervalsClient({
-    apiKey: env.INTERVALS_API_KEY,
-    athleteId: env.INTERVALS_ATHLETE_ID,
-  });
-  const wellness = createWellnessSync({
-    client: intervalsClient,
-    health,
-    timeZone: env.TIMEZONE,
-    logger,
-  });
-  // ADR-015: hourly while awake, so the morning's sleep/HRV shows up soon after the watch syncs.
-  jobs.push({
-    name: "intervals-wellness",
-    cron: "15 6-22 * * *",
-    runOnStart: true,
-    run: async () => {
-      await wellness.syncRecent();
-    },
-  });
-  const profileSync = createProfileSync({
-    client: intervalsClient,
-    markers,
-    fitness,
-    timeZone: env.TIMEZONE,
-    logger,
-  });
-  // ADR-016: thresholds change rarely; once a day early in the morning, plus on boot.
-  jobs.push({
-    name: "intervals-profile",
-    cron: "30 5 * * *",
-    runOnStart: true,
-    run: async () => {
-      await profileSync.sync();
-    },
-  });
-} else {
-  logger.info({ module: "intervals" }, "Intervals.icu disabled (API key or athlete id unset)");
-}
-
 // spec.md §6.4: Sunday 19:00 local time, in the IANA zone (never a fixed "CET" offset).
 jobs.push({
   name: "sunday-recap",
@@ -297,6 +316,31 @@ jobs.push({
     await notifier.notify(await planner.startRecap());
   },
 });
+
+// /import: one-time history (12 months of Strava activities, 90 days of wellness), safe to
+// repeat. The two parts are independent: one failing doesn't stop the other.
+const importHistory = async (): Promise<ImportSummary> => {
+  const [stravaResult, wellnessResult] = await Promise.allSettled([
+    stravaImport ? stravaImport.run(IMPORT_ACTIVITY_DAYS) : Promise.resolve(null),
+    wellness ? wellness.backfill(IMPORT_WELLNESS_DAYS) : Promise.resolve(null),
+  ]);
+  for (const result of [stravaResult, wellnessResult]) {
+    if (result.status === "rejected") {
+      logger.error({ err: result.reason }, "history import part failed");
+    }
+  }
+  return {
+    activities:
+      stravaResult.status === "fulfilled"
+        ? stravaResult.value
+        : // Configured but not connected (or access revoked): same as not configured.
+          stravaResult.reason instanceof StravaAuthError
+          ? null
+          : "failed",
+    wellnessDays:
+      wellnessResult.status === "fulfilled" ? (wellnessResult.value?.length ?? null) : "failed",
+  };
+};
 
 const orchestrator = createOrchestrator({
   claude,
@@ -331,6 +375,7 @@ configureBot(bot, {
   pending,
   planner,
   onboarding: orchestrator,
+  importHistory,
   connect,
   monthlyBudgetEur: env.MONTHLY_LLM_BUDGET_EUR,
   timeZone: env.TIMEZONE,

@@ -12,6 +12,9 @@ export type ActivityStore = {
   // ADR-009: upsert on `external_id`. `inserted` is false when the row already existed
   // (a webhook retry or an update event), so callers can skip one-off side effects.
   upsert(activity: NewActivity): Promise<{ activity: Activity; inserted: boolean }>;
+  // History import: inserts only when the activity isn't stored yet, so a detailed record
+  // from the webhook is never replaced by a summary. True when a row was inserted.
+  insertMissing(activity: NewActivity): Promise<boolean>;
   deleteByExternalId(externalId: string): Promise<void>;
   // Activities with `from <= started_at < to`, oldest first.
   between(from: Date, to: Date): Promise<ActivitySummary[]>;
@@ -33,6 +36,15 @@ export function createActivityStore(db: Database): ActivityStore {
       if (!row) throw new Error("activity upsert returned no row");
       const { inserted, ...stored } = row;
       return { activity: stored, inserted };
+    },
+
+    async insertMissing(activity) {
+      const rows = await db
+        .insert(activities)
+        .values(activity)
+        .onConflictDoNothing({ target: activities.externalId })
+        .returning({ id: activities.id });
+      return rows.length > 0;
     },
 
     async deleteByExternalId(externalId) {
