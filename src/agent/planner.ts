@@ -1,4 +1,9 @@
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import type {
+  ContentBlockParam,
+  MessageParam,
+  ToolResultBlockParam,
+} from "@anthropic-ai/sdk/resources/messages/messages";
 import type { Logger } from "pino";
 import { z } from "zod";
 import type { ConversationStore } from "../db/conversations.js";
@@ -18,6 +23,14 @@ import { textOf } from "./history.js";
 import { replyText } from "./orchestrator.js";
 import { planText } from "./plan-format.js";
 import type { Reply } from "./reply.js";
+import { runToolCall, type ToolHandlers } from "./tool-handlers.js";
+import { SEARCH_LITERATURE_TOOL, TOOL_NAMES } from "./tools.js";
+
+// ADR-014: plan generation may look things up in the literature, nothing else. Its own fixed
+// tool list keeps its cached prefix stable (ADR-004).
+const PLANNER_TOOLS = [SEARCH_LITERATURE_TOOL];
+// Search rounds before the plan has to be written.
+export const PLANNER_TOOL_ROUNDS = 2;
 
 // Structured output of plan generation (stack doc §6): the recap message and the plan.
 export const recapOutputSchema = z.object({
@@ -31,6 +44,7 @@ type PlannerDeps = {
   conversations: Pick<ConversationStore, "append">;
   pending: Pick<PendingActionStore, "create" | "clear">;
   calendar: CalendarContext;
+  tools: ToolHandlers;
   // Re-reads thresholds from Intervals.icu so a change made since the last weekly check is
   // in the plan. Best effort: a failure is logged and planning goes on.
   refreshThresholds?: () => Promise<unknown>;
@@ -60,6 +74,48 @@ export function createPlanner(deps: PlannerDeps): Planner {
   const log = deps.logger.child({ module: "planner" });
   const now = deps.now ?? (() => new Date());
   const format = zodOutputFormat(recapOutputSchema);
+
+  // The plan call, with literature lookups in between (not stored in the conversation: only
+  // the finished recap is). The last round can't call tools, so it has to write the plan.
+  async function callWithSearch(context: string, prompt: string, instant: Date, today: string) {
+    let messages: MessageParam[] = [{ role: "user", content: [{ type: "text", text: prompt }] }];
+    const toolContext = { chatId: deps.chatId, now: instant, today };
+    let tokensUsed = 0;
+    for (let round = 0; ; round++) {
+      const { message, model } = await deps.claude.call({
+        callType: "plan_generation",
+        dynamicContext: context,
+        outputFormat: format,
+        tools: PLANNER_TOOLS,
+        toolChoice: { type: round >= PLANNER_TOOL_ROUNDS ? "none" : "auto" },
+        messages,
+      });
+      tokensUsed += message.usage.input_tokens + message.usage.output_tokens;
+      const calls = message.content.filter((block) => block.type === "tool_use");
+      if (message.stop_reason !== "tool_use" || calls.length === 0) {
+        return { message, model, tokensUsed };
+      }
+      const results: ToolResultBlockParam[] = [];
+      for (const call of calls) {
+        if (call.name !== TOOL_NAMES.literature) {
+          results.push({
+            type: "tool_result",
+            tool_use_id: call.id,
+            content: `${call.name} isn't available while planning.`,
+            is_error: true,
+          });
+          continue;
+        }
+        results.push((await runToolCall(deps.tools, call, toolContext, log)).result);
+      }
+      // Thinking blocks go back unchanged with their tool_use.
+      messages = [
+        ...messages,
+        { role: "assistant", content: message.content as ContentBlockParam[] },
+        { role: "user", content: results },
+      ];
+    }
+  }
 
   return {
     async startRecap() {
@@ -101,6 +157,7 @@ export function createPlanner(deps: PlannerDeps): Planner {
         `Plan the week Mon ${target} to Sun ${end}.${target <= today ? ` Only plan days from ${today} on; the week has already started.` : ""}`,
         "recap: the Telegram message. Open with any missing or stale fitness markers and the field test you scheduled for each. Then review last week (planned vs actual per sport, key sessions, intensity distribution), recovery (HRV, sleep, resting HR, ACWR), and the plan's focus and reasoning (phase, load progression of at most 10%, whether a recovery week is due). Plain text, short paragraphs, no Markdown, no session list (the plan is shown below it). 120-300 words.",
         "plan: every session of the week with start times that fit the athlete's availability and calendar, targets from the athlete's own zones (RPE where a sport has no anchor), field_test set on test sessions, B/C races handled per their priority. Rest days have no sessions.",
+        "The TRAINING PRINCIPLES normally suffice. Use search_literature only when a decision this week needs a source (e.g. taper length before a race); cite what you use in the recap.",
       ].join("\n");
 
       await deps.conversations.append({
@@ -109,12 +166,7 @@ export function createPlanner(deps: PlannerDeps): Planner {
           { type: "text", text: `[Weekly recap for the week of Mon ${target}]\n${feedback}` },
         ],
       });
-      const { message, model } = await deps.claude.call({
-        callType: "plan_generation",
-        dynamicContext: context,
-        outputFormat: format,
-        messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
-      });
+      const { message, model, tokensUsed } = await callWithSearch(context, prompt, instant, today);
 
       const parsed =
         message.stop_reason === "end_turn"
@@ -144,7 +196,7 @@ export function createPlanner(deps: PlannerDeps): Planner {
         role: "assistant",
         content: [{ type: "text", text: `${recap}\n\n${planText(plan)}` }],
         model,
-        tokensUsed: message.usage.input_tokens + message.usage.output_tokens,
+        tokensUsed,
       });
 
       await deps.pending.clear(deps.chatId, ["apply_plan"]);

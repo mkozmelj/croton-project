@@ -8,6 +8,10 @@ export const MODELS = {
 
 export type ModelId = (typeof MODELS)[keyof typeof MODELS];
 
+// ADR-014: OpenAI embeddings for the literature corpus. Every literature_chunks row records the
+// model it was embedded with; changing this means re-running ingest on the source files.
+export const EMBEDDING_MODEL = "text-embedding-3-small";
+
 // z.coerce.boolean() turns the string "false" into true — parse the literal instead.
 const booleanString = z
   .enum(["true", "false"])

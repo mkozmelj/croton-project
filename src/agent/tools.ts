@@ -5,8 +5,9 @@ import { MARKER_METRICS } from "../training/markers.js";
 import { weekPlanSchema } from "../training/plan.js";
 
 // The single source of truth for the chat tools (stack doc §6); tool-handlers.ts runs them.
-// Every tool only *proposes*: it creates a pending action (ADR-007) that the athlete confirms
-// with a button. Descriptions say when to call, because models under-trigger tools otherwise.
+// The propose_* tools only *propose*: each creates a pending action (ADR-007) that the athlete
+// confirms with a button. search_literature is read-only (ADR-014). Descriptions say when to
+// call, because models under-trigger tools otherwise.
 
 export const proposeGoalInput = z.object({
   event_name: z.string().describe("e.g. 'Ironman 70.3 Pula'"),
@@ -78,6 +79,16 @@ export const proposePlanInput = weekPlanSchema.extend({
   reason: z.string().describe("One line on what changed and why, shown to the athlete"),
 });
 
+export const searchLiteratureInput = z.object({
+  query: z
+    .string()
+    .min(3)
+    .describe(
+      "A focused topic or question in English, e.g. 'taper length and volume reduction before a half-Ironman'",
+    ),
+  max_results: z.number().int().min(1).max(8).nullable().describe("Default 5"),
+});
+
 function inputSchema(schema: z.ZodType): Tool.InputSchema {
   const { $schema: _dialect, ...json } = z.toJSONSchema(schema) as Record<string, unknown>;
   return { ...json, type: "object" };
@@ -88,7 +99,15 @@ export const TOOL_NAMES = {
   profile: "propose_profile_update",
   marker: "propose_fitness_marker",
   plan: "propose_week_plan",
+  literature: "search_literature",
 } as const;
+
+export const SEARCH_LITERATURE_TOOL: Tool = {
+  name: TOOL_NAMES.literature,
+  description:
+    "Search the coaching library: sports-science papers (polarized training, intensity distribution, ACWR and load, tapering, HRV-guided training), coaching articles, and excerpts from training books. Call this when the athlete asks a specific training-science question that the TRAINING PRINCIPLES don't settle (e.g. how long to taper, what the research says about a method, how to structure a particular session type), or when a planning decision would benefit from a source. Don't call it for questions about the athlete's own data, plan or schedule. Returns the most relevant passages, each with its source and page or location; cite the ones you use briefly, e.g. (Bosquet 2007, p. 4). If nothing relevant comes back, say so and answer from the principles.",
+  input_schema: inputSchema(searchLiteratureInput),
+};
 
 // Order and content are fixed: tools are part of the cached prompt prefix (ADR-004).
 export const CHAT_TOOLS: Tool[] = [
@@ -116,4 +135,5 @@ export const CHAT_TOOLS: Tool[] = [
       "Propose the complete plan for one week (this week or next week) in place of the stored one. Call this when the athlete asks to change the plan (move, swap, add, drop or shorten sessions) or asks for a plan outside the Sunday recap. Include every session of the week, unchanged ones too. Sessions on days before today are kept from the stored plan whatever you pass. Keep the week's intensity distribution. Nothing is saved or put in the calendar until the athlete confirms.",
     input_schema: inputSchema(proposePlanInput),
   },
+  SEARCH_LITERATURE_TOOL,
 ];

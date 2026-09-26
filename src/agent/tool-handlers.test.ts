@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GoalWithEvent } from "../db/goals.js";
+import type { SearchOutcome } from "../knowledge/literature-search.js";
 import { inMemoryPending } from "./test-helpers.js";
 import { createToolHandlers, parseClock, raceMarkersFrom } from "./tool-handlers.js";
 
@@ -12,14 +13,34 @@ const existingA = {
   event: { name: "Old A", date: "2027-05-01" },
 } as GoalWithEvent;
 
-function setup(goals: GoalWithEvent[] = []) {
+const passage = {
+  id: 1,
+  source: "Bosquet 2007",
+  chapter: null,
+  section: "Results",
+  locator: "p. 3",
+  content: "A 2-week taper with 41-60% volume reduction was most effective.",
+  score: 0.61,
+};
+
+function setup(
+  goals: GoalWithEvent[] = [],
+  literature: SearchOutcome = { status: "ok", results: [passage] },
+) {
   const pending = inMemoryPending(() => NOW);
+  const searches: { query: string; limit: number }[] = [];
   const handlers = createToolHandlers({
     pending: pending.store,
     goals: { activeInSeasons: async () => goals },
     plans: { forWeek: async () => null },
+    literature: {
+      search: async (query, limit) => {
+        searches.push({ query, limit });
+        return literature;
+      },
+    },
   });
-  return { handlers, pending };
+  return { handlers, pending, searches };
 }
 
 const goalInput = {
@@ -198,5 +219,42 @@ describe("helpers", () => {
         notes: "City 10K",
       }),
     ]);
+  });
+});
+
+describe("search_literature", () => {
+  const call = (input: unknown) => ({ name: "search_literature", input });
+
+  it("returns citable passages and creates no proposal", async () => {
+    const { handlers, pending, searches } = setup();
+    const outcome = await handlers.run(call({ query: "taper length", max_results: null }), context);
+    expect(outcome.isError).toBe(false);
+    expect(outcome.proposal).toBeUndefined();
+    expect(outcome.content).toContain("[1] Bosquet 2007 | Results | p. 3 (relevance 0.61)");
+    expect(outcome.content).toContain("41-60% volume reduction");
+    expect(searches).toEqual([{ query: "taper length", limit: 5 }]);
+    expect(pending.rows()).toHaveLength(0);
+  });
+
+  it("passes max_results through", async () => {
+    const { handlers, searches } = setup();
+    await handlers.run(call({ query: "taper length", max_results: 3 }), context);
+    expect(searches[0]?.limit).toBe(3);
+  });
+
+  it("reports a missing configuration or an empty library as an error result", async () => {
+    for (const status of ["not_configured", "empty"] as const) {
+      const { handlers } = setup([], { status });
+      const outcome = await handlers.run(call({ query: "taper", max_results: null }), context);
+      expect(outcome.isError).toBe(true);
+      expect(outcome.content).toContain("Answer from the training principles");
+    }
+  });
+
+  it("rejects invalid input", async () => {
+    const { handlers, searches } = setup();
+    const outcome = await handlers.run(call({ query: "x", max_results: 50 }), context);
+    expect(outcome.isError).toBe(true);
+    expect(searches).toHaveLength(0);
   });
 });

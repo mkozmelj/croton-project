@@ -40,12 +40,21 @@ const message = (text: string, stop: Message["stop_reason"] = "end_turn") =>
     usage: { input_tokens: 100, output_tokens: 50 },
   }) as Message;
 
+const toolUse = (name: string, id = "toolu_1") =>
+  ({
+    content: [{ type: "tool_use", id, name, input: { query: "taper length", max_results: null } }],
+    stop_reason: "tool_use",
+    usage: { input_tokens: 80, output_tokens: 20 },
+  }) as unknown as Message;
+
 function setup(
-  reply: Message,
+  reply: Message | Message[],
   calendarLines: string[] | null = ['- Tue 29 Sep 09:00-17:00: "Work"'],
   refreshThresholds?: () => Promise<unknown>,
 ) {
   const calls: ClaudeRequest[] = [];
+  const toolCalls: string[] = [];
+  const replies = Array.isArray(reply) ? [...reply] : [reply];
   const contexts: unknown[] = [];
   const conversations = inMemoryConversations();
   const pending = inMemoryPending(() => NOW);
@@ -53,7 +62,9 @@ function setup(
     claude: {
       call: async (request) => {
         calls.push(request);
-        return { message: reply, model: MODELS.sonnet, costEur: 0.1 };
+        const next = replies.length > 1 ? replies.shift() : replies[0];
+        if (!next) throw new Error("no reply scripted");
+        return { message: next, model: MODELS.sonnet, costEur: 0.1 };
       },
     },
     context: {
@@ -65,13 +76,19 @@ function setup(
     conversations,
     pending: pending.store,
     calendar: { weekLines: async () => calendarLines },
+    tools: {
+      run: async (call) => {
+        toolCalls.push(call.name);
+        return { content: "[1] Bosquet 2007 | p. 3\nTaper 8-14 days.", isError: false };
+      },
+    },
     ...(refreshThresholds ? { refreshThresholds } : {}),
     chatId: 1,
     timeZone: "Europe/Ljubljana",
     logger: pino({ level: "silent" }),
     now: () => NOW,
   });
-  return { planner, calls, contexts, conversations, pending };
+  return { planner, calls, toolCalls, contexts, conversations, pending };
 }
 
 describe("planTargetWeek", () => {
@@ -144,5 +161,49 @@ describe("createPlanner", () => {
       throw new Error("intervals down");
     });
     expect((await failing.planner.generate({ feedback: "ok" })).proposals).toHaveLength(1);
+  });
+});
+
+describe("planner literature lookups", () => {
+  it("runs search_literature, then writes the plan with the results in context", async () => {
+    const { planner, calls, toolCalls, conversations } = setup([
+      toolUse("search_literature"),
+      message(JSON.stringify(output)),
+    ]);
+    const reply = await planner.generate({ feedback: "Race in 10 days" });
+
+    expect(toolCalls).toEqual(["search_literature"]);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.tools?.map((tool) => tool.name)).toEqual(["search_literature"]);
+    expect(calls[1]?.messages.at(-1)).toMatchObject({
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: "toolu_1" }],
+    });
+    expect(reply.proposals).toHaveLength(1);
+    // Both rounds are counted; the tool turns aren't stored in the conversation.
+    expect(conversations.turns.at(-1)?.tokensUsed).toBe(250);
+    expect(conversations.turns).toHaveLength(2);
+  });
+
+  it("refuses tools other than search_literature", async () => {
+    const { planner, calls, toolCalls } = setup([
+      toolUse("propose_goal"),
+      message(JSON.stringify(output)),
+    ]);
+    await planner.generate({ feedback: "ok" });
+    expect(toolCalls).toEqual([]);
+    expect(calls[1]?.messages.at(-1)).toMatchObject({
+      content: [{ type: "tool_result", is_error: true }],
+    });
+  });
+
+  it("turns tools off after the last search round", async () => {
+    const { planner, calls } = setup([
+      toolUse("search_literature", "a"),
+      toolUse("search_literature", "b"),
+      message(JSON.stringify(output)),
+    ]);
+    await planner.generate({ feedback: "ok" });
+    expect(calls.map((call) => call.toolChoice?.type)).toEqual(["auto", "auto", "none"]);
   });
 });

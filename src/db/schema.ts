@@ -9,6 +9,7 @@ import {
   jsonb,
   numeric,
   pgTable,
+  real,
   serial,
   text,
   timestamp,
@@ -280,3 +281,30 @@ export const trainingPlans = pgTable("training_plans", {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+export const LITERATURE_SOURCE_TYPES = ["paper", "article", "book_scan", "notes"] as const;
+
+// ADR-014: the only stored copy of the corpus (source files stay in git-ignored
+// data/literature/). Written only by the ingest CLI; `content_hash` makes re-runs idempotent.
+// Search loads the rows for the current `embedding_model` into memory, so no pgvector.
+export const literatureChunks = pgTable(
+  "literature_chunks",
+  {
+    id: serial("id").primaryKey(),
+    source: text("source").notNull(),
+    sourceType: text("source_type", { enum: LITERATURE_SOURCE_TYPES }).notNull(),
+    chapter: text("chapter"),
+    section: text("section"),
+    // Page or location, for citations.
+    locator: text("locator"),
+    content: text("content").notNull(),
+    contentHash: text("content_hash").notNull(),
+    embeddingModel: text("embedding_model").notNull(),
+    embedding: real("embedding").array().notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    // ADR-009 upsert target.
+    uniqueIndex("literature_chunks_source_hash").on(table.source, table.contentHash),
+  ],
+);

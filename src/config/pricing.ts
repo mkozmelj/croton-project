@@ -1,6 +1,8 @@
 import { MODELS, type ModelId } from "./env.js";
 
 // ADR-008: per-model pricing in USD per million tokens. Review together with MODELS on every bump.
+// Checked 2026-09-26 against platform.claude.com/docs/en/about-claude/pricing: Sonnet 5's launch
+// price ($2/$10) became its standard price; the planned rise to $3/$15 was cancelled.
 // Thinking tokens bill as output tokens (ADR-005).
 export type ModelPricing = {
   inputPerMTok: number;
@@ -8,9 +10,12 @@ export type ModelPricing = {
 };
 
 export const PRICING: Record<ModelId, ModelPricing> = {
-  [MODELS.sonnet]: { inputPerMTok: 3, outputPerMTok: 15 },
+  [MODELS.sonnet]: { inputPerMTok: 2, outputPerMTok: 10 },
   [MODELS.haiku]: { inputPerMTok: 1, outputPerMTok: 5 },
 };
+
+// ADR-014: text-embedding-3-small, USD per million input tokens (no output tokens).
+export const EMBEDDING_PRICE_PER_MTOK = 0.02;
 
 // Prompt-cache multipliers on the base input price.
 export const CACHE_MULTIPLIERS = {

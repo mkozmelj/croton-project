@@ -16,7 +16,7 @@ describe("calculateCostEur", () => {
       input_tokens: 1_000_000,
       output_tokens: 1_000_000,
     });
-    expect(cost).toBeCloseTo((3 + 15) * USD_TO_EUR, 6);
+    expect(cost).toBeCloseTo((2 + 10) * USD_TO_EUR, 6);
   });
 
   it("prices Haiku with its own rates", () => {
@@ -39,7 +39,7 @@ describe("calculateCostEur", () => {
         ephemeral_5m_input_tokens: 1_000_000,
       },
     });
-    expect(cost).toBeCloseTo(3 * (0.1 + 2 + 1.25) * USD_TO_EUR, 6);
+    expect(cost).toBeCloseTo(2 * (0.1 + 2 + 1.25) * USD_TO_EUR, 6);
   });
 
   it("assumes the 1h write price when the TTL breakdown is missing", () => {
@@ -50,7 +50,7 @@ describe("calculateCostEur", () => {
       cache_creation_input_tokens: 1_000_000,
       cache_creation: null,
     });
-    expect(cost).toBeCloseTo(3 * 2 * USD_TO_EUR, 6);
+    expect(cost).toBeCloseTo(2 * 2 * USD_TO_EUR, 6);
   });
 });
 

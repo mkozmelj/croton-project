@@ -18,7 +18,10 @@
     "check": "biome check . && tsc --noEmit && vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "strava:subscribe": "tsx --env-file-if-exists=.env src/integrations/strava/subscribe-cli.ts"
+    "strava:subscribe": "tsx --env-file-if-exists=.env src/integrations/strava/subscribe-cli.ts",
+    "ingest": "tsx --env-file-if-exists=.env src/knowledge/ingest-cli.ts",
+    "eval:embed": "tsx --env-file-if-exists=.env src/knowledge/eval-embed-cli.ts",
+    "tp:import": "tsx --env-file-if-exists=.env src/integrations/trainingpeaks/import-cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",
@@ -34,6 +37,8 @@
     "@biomejs/biome": "^2.5.14",
     "@types/node": "^24.13.6",
     "drizzle-kit": "^0.31.11",
+    "fflate": "^0.8.3",
+    "node-html-parser": "^9.0.4",
     "pino-pretty": "^13.1.3",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

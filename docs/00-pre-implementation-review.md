@@ -13,7 +13,7 @@ Full reasoning and the resulting decisions live in `02-architecture-decisions.md
 
 | Model | ID | Input / Output per MTok | Context | Notes |
 |---|---|---|---|---|
-| Claude Sonnet 5 | `claude-sonnet-5` | $3.00 / $15.00 | 1M | Current Sonnet-tier model. Its intro discount window ($2/$10) ended 2026-08-31 — full price applies now. |
+| Claude Sonnet 5 | `claude-sonnet-5` | $2.00 / $10.00 | 1M | Current Sonnet-tier model. Corrected 2026-09-26: the $2/$10 launch price became the standard price, and the rise to $3/$15 announced for 2026-09-01 was cancelled. |
 | Claude Haiku 4.5 | `claude-haiku-4-5` | $1.00 / $5.00 | 200K | Unchanged from spec. No adaptive thinking or `effort` support. |
 
 **Behavioral change that affects cost, not just the ID:** on Sonnet 4.6 (what the spec assumed), omitting the `thinking` parameter meant *no thinking*. On Sonnet 5, omitting it runs **adaptive thinking by default** — every Sonnet-tier call now spends thinking tokens unless you explicitly pass `thinking: {type: "disabled"}`. This directly affects the budget model in spec.md §8.4, which was costed assuming thinking-off. See ADR-005.

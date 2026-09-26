@@ -1,0 +1,78 @@
+{
+  "sources": {
+    "seiler-2010.md": { "source": "Seiler 2010", "type": "paper" },
+    "stoggl-sperlich-2014.md": { "source": "Stöggl & Sperlich 2014", "type": "paper" },
+    "gabbett-2016.md": { "source": "Gabbett 2016", "type": "paper" },
+    "impellizzeri-2020.md": { "source": "Impellizzeri et al. 2020", "type": "paper" },
+    "bosquet-2007.md": { "source": "Bosquet et al. 2007", "type": "paper" },
+    "plews-2013.md": { "source": "Plews et al. 2013", "type": "paper" },
+    "daniels-notes.md": { "source": "Daniels notes", "type": "notes" },
+    "css-swim.md": { "source": "CSS swim training", "type": "article" },
+    "brick-training.md": { "source": "Brick workouts", "type": "article" },
+    "downhill-running.md": { "source": "Downhill running", "type": "article" },
+    "race-fueling.md": { "source": "Race fueling", "type": "article" },
+    "strength-training.md": { "source": "Strength for endurance", "type": "article" },
+    "heat-acclimation.md": { "source": "Heat acclimation", "type": "article" },
+    "sleep-recovery.md": { "source": "Sleep and recovery", "type": "article" },
+    "fitzgerald-8020.md": { "source": "Fitzgerald 80/20", "type": "article" }
+  },
+  "questions": [
+    {
+      "query": "How long should I taper before my A race and how much should I cut volume?",
+      "source": "Bosquet et al. 2007"
+    },
+    { "query": "Should I keep doing intervals during the taper?", "source": "Bosquet et al. 2007" },
+    {
+      "query": "What did the study comparing polarized, threshold, HIIT and high-volume training find?",
+      "source": "Stöggl & Sperlich 2014"
+    },
+    {
+      "query": "How do elite endurance athletes distribute their training intensity?",
+      "source": "Seiler 2010"
+    },
+    {
+      "query": "Is the acute:chronic workload ratio a reliable predictor of injury?",
+      "source": "Impellizzeri et al. 2020"
+    },
+    {
+      "query": "What ACWR range keeps injury risk low, and does a high training load protect me?",
+      "source": "Gabbett 2016"
+    },
+    {
+      "query": "My HRV dropped this morning, should I skip the hard session?",
+      "source": "Plews et al. 2013"
+    },
+    {
+      "query": "How much interval running at I pace per week is too much?",
+      "source": "Daniels notes"
+    },
+    { "query": "What pace should my threshold runs be?", "source": "Daniels notes" },
+    { "query": "What swim sets should I do at CSS pace?", "source": "CSS swim training" },
+    {
+      "query": "My legs feel like jelly when I run off the bike, how do I fix that?",
+      "source": "Brick workouts"
+    },
+    {
+      "query": "How do I prepare my quads for long steep descents in a mountain race?",
+      "source": "Downhill running"
+    },
+    {
+      "query": "How many grams of carbohydrate per hour should I take in a half-Ironman?",
+      "source": "Race fueling"
+    },
+    { "query": "How much sodium do I need during long races?", "source": "Race fueling" },
+    {
+      "query": "Will lifting heavy weights make me bulky or slower as a runner?",
+      "source": "Strength for endurance"
+    },
+    {
+      "query": "My race is somewhere hot, how do I acclimatize beforehand?",
+      "source": "Heat acclimation"
+    },
+    { "query": "Does sleeping more improve performance?", "source": "Sleep and recovery" },
+    {
+      "query": "How can I tell if my easy runs are too hard without a lab test?",
+      "source": "Fitzgerald 80/20"
+    }
+  ]
+}

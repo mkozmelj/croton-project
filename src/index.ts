@@ -38,6 +38,7 @@ import { createConversationStore } from "./db/conversations.js";
 import { createFitnessMarkerStore } from "./db/fitness-markers.js";
 import { createGoalStore } from "./db/goals.js";
 import { createHealthMetricsStore } from "./db/health-metrics.js";
+import { createLiteratureStore } from "./db/literature.js";
 import { createUsageStore } from "./db/llm-usage.js";
 import { createOAuthStateStore } from "./db/oauth-states.js";
 import { createOAuthTokenStore, type OAuthProvider } from "./db/oauth-tokens.js";
@@ -70,6 +71,8 @@ import {
 } from "./integrations/strava/history-import.js";
 import { createStravaAuth, StravaAuthError } from "./integrations/strava/oauth.js";
 import { registerStravaWebhook } from "./integrations/strava/webhook.js";
+import { createOpenAIEmbedder } from "./knowledge/embeddings.js";
+import { createLiteratureSearch } from "./knowledge/literature-search.js";
 import { connectionStringSecrets, createLogger } from "./logging/logger.js";
 import { registerInfoPages } from "./pages.js";
 import { type Job, type Scheduler, startScheduler } from "./scheduler/cron.js";
@@ -90,6 +93,7 @@ const logger = createLogger({
       env.TOKEN_ENCRYPTION_KEY,
       env.INTERVALS_API_KEY,
       env.INTERVALS_API_KEY && intervalsBasicCredentials(env.INTERVALS_API_KEY),
+      env.OPENAI_API_KEY,
     ].filter((secret) => secret !== undefined),
   ],
 });
@@ -136,6 +140,15 @@ const context = createContextBuilder({
   chatId,
   timeZone: env.TIMEZONE,
 });
+// ADR-014: without OPENAI_API_KEY the tool stays offered and answers "not configured".
+const literature = createLiteratureSearch({
+  store: createLiteratureStore(db),
+  embedder: env.OPENAI_API_KEY
+    ? createOpenAIEmbedder({ apiKey: env.OPENAI_API_KEY, usage, timeZone: env.TIMEZONE })
+    : null,
+  logger,
+});
+const tools = createToolHandlers({ pending, goals, plans, literature });
 const tasks = createBackgroundTasks({
   logger,
   onError: (label) =>
@@ -244,6 +257,7 @@ const planner = createPlanner({
   conversations,
   pending,
   calendar: createCalendarContext({ calendar, timeZone: env.TIMEZONE, logger }),
+  tools,
   ...(profileSync ? { refreshThresholds: profileSync.sync } : {}),
   chatId,
   timeZone: env.TIMEZONE,
@@ -346,7 +360,7 @@ const orchestrator = createOrchestrator({
   claude,
   conversations,
   context,
-  tools: createToolHandlers({ pending, goals, plans }),
+  tools,
   pending,
   planner,
   chatId,
@@ -404,6 +418,10 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 try {
   await runMigrations(db);
   logger.info({ module: "db" }, "migrations applied");
+  // Not fatal: search retries the load on its first call.
+  await literature.load().catch((error: unknown) => {
+    logger.error({ err: error, module: "literature" }, "literature index load failed");
+  });
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
   await startBot(bot, { transport, authorizedChatId: env.TELEGRAM_AUTHORIZED_CHAT_ID, logger });
   // After migrations: jobs write to the DB, and runOnStart jobs fire immediately.

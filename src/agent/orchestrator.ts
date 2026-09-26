@@ -14,7 +14,7 @@ import type { ContextBuilder } from "./context.js";
 import { HISTORY_LIMIT, textOf, toMessageParams } from "./history.js";
 import type { Planner } from "./planner.js";
 import type { Reply } from "./reply.js";
-import type { ToolHandlers, ToolOutcome } from "./tool-handlers.js";
+import { runToolCall, type ToolHandlers } from "./tool-handlers.js";
 import { CHAT_TOOLS } from "./tools.js";
 
 // Tool rounds per message before the model has to answer in text. Proposals are one call
@@ -92,20 +92,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const results: ToolResultBlockParam[] = [];
       // One after another: handlers write pending actions and may depend on each other.
       for (const call of calls) {
-        // A failing handler becomes an error result: the tool_use must get its tool_result.
-        const outcome = await deps.tools
-          .run(call, toolContext)
-          .catch((error: unknown): ToolOutcome => {
-            deps.logger?.error({ err: error, tool: call.name }, "tool handler failed");
-            return { content: "The tool failed internally; nothing was saved.", isError: true };
-          });
+        const { result, outcome } = await runToolCall(deps.tools, call, toolContext, deps.logger);
         if (outcome.proposal) proposals.push(outcome.proposal);
-        results.push({
-          type: "tool_result",
-          tool_use_id: call.id,
-          content: outcome.content,
-          ...(outcome.isError ? { is_error: true } : {}),
-        });
+        results.push(result);
       }
       await deps.conversations.append({ role: "user", content: results });
       // Within the loop, pass blocks back unchanged: thinking must accompany its tool_use.
