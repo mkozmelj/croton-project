@@ -96,4 +96,19 @@ describe("toMessageParams with an unfinished tool round", () => {
     ];
     expect(toMessageParams(turns)).toHaveLength(3);
   });
+
+  it("drops results whose tool_use was in a skipped leading assistant turn", () => {
+    // Production 400 (2026-09-24): the window started on the assistant's tool_use turn,
+    // which was skipped, but its tool_result was replayed as messages[0].
+    const messages = toMessageParams([
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "t1", name: "propose_goal", input: {} }],
+      },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] },
+      { role: "assistant", content: [{ type: "text", text: "Proposed." }] },
+      { role: "user", content: [{ type: "text", text: "Next" }] },
+    ]);
+    expect(messages).toEqual([{ role: "user", content: [{ type: "text", text: "Next" }] }]);
+  });
 });

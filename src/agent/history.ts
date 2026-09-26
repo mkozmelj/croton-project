@@ -14,34 +14,37 @@ export const HISTORY_LIMIT = 20;
 // replayed prefix deterministic, so the messages cache still hits.
 export function toMessageParams(turns: readonly Pick<ConversationTurn, "role" | "content">[]) {
   const messages: MessageParam[] = [];
+  // The API rejects a tool_use without a tool_result in the next message, and a tool_result
+  // without its tool_use in the one before. Unpaired blocks appear when a window cuts through
+  // a tool exchange or a tool round didn't finish (an error or a restart mid-round); they're
+  // dropped so one broken round can't break every later request. Results are checked against
+  // the last message actually pushed, not the previous stored turn, so a skipped turn (e.g. a
+  // leading assistant turn) takes its results with it.
+  let previousUses = new Set<string>();
   turns.forEach((turn, index) => {
-    const content = turn.content.filter(isReplayable).filter(pairedWith(turns, index));
-    if (content.length === 0) return;
+    const results = toolIds(turns[index + 1]?.content ?? [], "tool_result");
+    const content = turn.content.filter(isReplayable).filter((block) => {
+      if (block.type === "tool_use") return results.has(block.id);
+      if (block.type === "tool_result") return previousUses.has(block.tool_use_id);
+      return true;
+    });
     // The API requires the first message to be from the user.
-    if (messages.length === 0 && turn.role !== "user") return;
+    if (content.length === 0 || (messages.length === 0 && turn.role !== "user")) {
+      previousUses = new Set();
+      return;
+    }
     messages.push({ role: turn.role, content });
+    previousUses = toolIds(content, "tool_use");
   });
   return messages;
 }
 
-// The API rejects a tool_use without a tool_result in the next message, and a tool_result
-// without its tool_use in the one before. Unpaired blocks appear when a window cuts through
-// a tool exchange or a tool round didn't finish (an error or a restart mid-round); they're
-// dropped so one broken round can't break every later request.
-function pairedWith(turns: readonly Pick<ConversationTurn, "role" | "content">[], index: number) {
-  const idsIn = (turnIndex: number, type: "tool_use" | "tool_result") =>
-    new Set(
-      (turns[turnIndex]?.content ?? []).flatMap((block) =>
-        block.type === type ? [block.type === "tool_use" ? block.id : block.tool_use_id] : [],
-      ),
-    );
-  const results = idsIn(index + 1, "tool_result");
-  const uses = idsIn(index - 1, "tool_use");
-  return (block: ContentBlockParam) => {
-    if (block.type === "tool_use") return results.has(block.id);
-    if (block.type === "tool_result") return index > 0 && uses.has(block.tool_use_id);
-    return true;
-  };
+function toolIds(content: readonly ContentBlockParam[], type: "tool_use" | "tool_result") {
+  return new Set(
+    content.flatMap((block) =>
+      block.type === type ? [block.type === "tool_use" ? block.id : block.tool_use_id] : [],
+    ),
+  );
 }
 
 function isReplayable(block: ContentBlockParam): boolean {
