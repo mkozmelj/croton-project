@@ -140,17 +140,24 @@ Concrete, sequential implementation checklist. Supersedes `spec.md` §13's phase
 
 **Goal:** Same as spec.md §13 Phase 5, reliability items made concrete per `01-stack-and-principles.md` §5.
 
-- [ ] Conversation summarization/cleanup job (monthly, per spec.md §6.2)
-- [ ] Model router (`src/agent/classifier.ts`) with the Sonnet-biased heuristic from the review doc (#13) — day-of-week/workout/plan/race keywords force Sonnet regardless of message length
-- [ ] Token-refresh retry with backoff + Telegram alert after 3 failures, `/reauth` command
-- [ ] `/profile` editing (view-only version is in Phase 3; onboarding covers first-time setup)
-- [ ] `pino` structured logging wired everywhere, with secret redaction configured at the logger level
-- [ ] Uncaught-error → Telegram-alert wiring in every webhook handler and cron job (per `01-stack-and-principles.md` §5 — this *is* the observability strategy for this project, make sure it's actually wired everywhere, not just planned)
-- [ ] Threshold breakthrough check: an activity clearly beating a marker (e.g. 20-min power > 105% FTP, a run faster than predicted by VDOT) proposes a marker update (ADR-016)
+- [x] Conversation summarization/cleanup job (monthly, per spec.md §6.2): `conversation-memory` cron (1st of the month, 03:30). Turns older than 60 days are summarized on Haiku (`conversation_summary`) into `conversation_memories` (migration `0005`) and then deleted. The last 6 notes go into the dynamic context. It's idempotent on the last summarized turn id, and over budget it keeps the turns for next month (`src/agent/memory.ts`)
+- [x] Model router (`src/agent/classifier.ts`) with the Sonnet-biased heuristic from the review doc (#13): day-of-week/workout/plan/race keywords force Sonnet regardless of message length. A Haiku-routed call that tries to propose a week plan is redone on Sonnet. `/deep` forces Sonnet (details in the ADR-005 implementation notes)
+- [x] Token-refresh retry with backoff + Telegram alert after 3 failures, `/reauth` command (`src/integrations/token-refresh.ts`, ADR-011 implementation notes)
+- [x] `/profile` editing: `/profile ftp 250`, `/profile pace 4:15`, `/profile availability …` and so on, confirmed with a button; `/profile help` lists them (`src/agent/profile-edit.ts`)
+- [x] `pino` structured logging wired everywhere, with secret redaction configured at the logger level. This was done in Phase 1; Phase 5 adds camelCase token fields to the redaction paths and a request serializer that drops query strings (OAuth `code`/`state`, the Strava verify token). `console` is only used by the CLIs
+- [x] Uncaught-error → Telegram-alert wiring in every webhook handler and cron job. Audit: the Telegram updates go through the grammy error boundary, Fastify routes through the 5xx error handler, Strava events through the background-task runner, and cron jobs through `guardedJob`. New: the `unhandledRejection` / `uncaughtException` handlers (`src/utils/process-guards.ts`), an alert when startup fails, and a hidden `/selftest` command that fails on purpose
+- [x] Threshold breakthrough check: an activity clearly beating a marker (e.g. 20-min power > 105% FTP, a run faster than predicted by VDOT) proposes a marker update (ADR-016). Implemented with a 3% margin; the ADR-016 implementation notes explain why that's stricter than the 105% example (`src/training/breakthroughs.ts`)
 
 **Acceptance:** Force a Strava token to expire and confirm the retry-then-alert path fires correctly. Force an unhandled exception in a webhook handler and confirm a Telegram alert arrives instead of a silent failure.
 
-**Manual steps needed:** none (§12.2 #15 moved to Phase 3).
+**Status: implemented (2026-09-27), not yet deployed or acceptance-checked.** `npm run check` passes (411 tests). Unit tests cover the retry path, since Strava's token endpoint can't be made to return 5xx on purpose: 503 three times → one "unavailable" alert, tokens unchanged; 502, 502, 200 → recovers silently; 400 → no retry, one "rejected" alert.
+
+**How to run the acceptance checks in production (after deploying):**
+1. **Refresh works after expiry:** in the Neon SQL editor, `UPDATE oauth_tokens SET expires_at = now() - interval '1 hour' WHERE provider = 'strava';` then send `/import`. It should report activities, and `expires_at` should be about 6 hours ahead again.
+2. **Refresh failure alerts:** expire the token again as in step 1, set `STRAVA_CLIENT_SECRET` to a wrong value in Railway (a redeploy follows), and send `/import`. Strava rejects the refresh, and one "Strava rejected the access renewal … /reauth strava" message arrives. `/import` a second time sends no second alert (one per streak). Then restore the real secret. No `/reauth` is needed afterwards, because the stored refresh token was never replaced.
+3. **Unhandled exception in a webhook handler:** send `/selftest`. You should get "Self-test: …", then "Background task selftest failed. It's logged." (the background-task boundary) and "Something broke while handling that message …" (the update handler's boundary). Railway logs show both errors with `module` fields.
+
+**Manual steps needed:** none beyond deploying (migration `0005` runs on boot) and the checks above.
 
 ---
 

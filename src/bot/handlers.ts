@@ -3,11 +3,12 @@ import type { Logger } from "pino";
 import type { ActionExecutor } from "../agent/action-executor.js";
 import { describeProposal } from "../agent/actions.js";
 import { BudgetExceededError } from "../agent/budget.js";
-import type { Orchestrator } from "../agent/orchestrator.js";
+import type { IncomingMessage, Orchestrator } from "../agent/orchestrator.js";
 import type { Reply } from "../agent/reply.js";
 import type { PendingActionRow } from "../db/pending-actions.js";
 import { GoogleCalendarError } from "../integrations/google/calendar.js";
 import { GoogleAuthError } from "../integrations/google/oauth.js";
+import { TokenRefreshError } from "../integrations/token-refresh.js";
 import { budgetRefusalText, failureText, splitMessage } from "./formatting.js";
 
 // Telegram clears the "typing…" indicator after ~5 s; refresh it while Claude works.
@@ -72,25 +73,33 @@ export async function withTyping<T>(ctx: Context, work: () => Promise<T>): Promi
 type HandlerDeps = { orchestrator: Orchestrator; executor: ActionExecutor };
 
 export function registerMessageHandlers(bot: Bot, { orchestrator, executor }: HandlerDeps) {
-  bot.on("message:text", async (ctx) => {
-    if (ctx.message.text.startsWith("/")) {
-      await ctx.reply("Unknown command. /start lists them.");
-      return;
-    }
-
+  async function answer(ctx: Context, incoming: IncomingMessage) {
     let reply: Reply;
     try {
-      reply = await withTyping(ctx, () =>
-        orchestrator.handleMessage({
-          text: ctx.message.text,
-          telegramMessageId: ctx.message.message_id,
-        }),
-      );
+      reply = await withTyping(ctx, () => orchestrator.handleMessage(incoming));
     } catch (error) {
       if (!(error instanceof BudgetExceededError)) throw error;
       reply = { text: budgetRefusalText(), proposals: [] };
     }
     await replyWithProposals(ctx, reply);
+  }
+
+  // spec.md §6.1: `/deep <message>` forces Sonnet for one message.
+  bot.command("deep", async (ctx) => {
+    const text = ctx.match.trim();
+    if (!text) {
+      await ctx.reply("Send /deep followed by your question, e.g. /deep am I ready for a 70.3?");
+      return;
+    }
+    await answer(ctx, { text, telegramMessageId: ctx.msg.message_id, deep: true });
+  });
+
+  bot.on("message:text", async (ctx) => {
+    if (ctx.message.text.startsWith("/")) {
+      await ctx.reply("Unknown command. /start lists them.");
+      return;
+    }
+    await answer(ctx, { text: ctx.message.text, telegramMessageId: ctx.message.message_id });
   });
 
   // ADR-007: the confirmation step. Everything it needs is in the pending_actions row, so a
@@ -113,7 +122,13 @@ export function registerMessageHandlers(bot: Bot, { orchestrator, executor }: Ha
       // The row was restored: keep the buttons so Confirm can be tapped again.
       if (error instanceof GoogleAuthError) {
         await ctx.reply(
-          "Google Calendar access has expired or was revoked. Send /connect calendar, then tap Confirm again.",
+          "Google Calendar access has expired or was revoked. Send /reauth calendar, then tap Confirm again.",
+        );
+        return;
+      }
+      if (error instanceof TokenRefreshError) {
+        await ctx.reply(
+          "Google didn't answer when renewing calendar access. Nothing was lost; tap Confirm to retry in a bit.",
         );
         return;
       }

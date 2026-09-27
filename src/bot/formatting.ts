@@ -14,6 +14,7 @@ import type { GoalWithEvent } from "../db/goals.js";
 import type { HealthMetrics } from "../db/health-metrics.js";
 import type { ModelSpend } from "../db/llm-usage.js";
 import { IntervalsApiError } from "../integrations/intervals/client.js";
+import type { RefreshFailureReason } from "../integrations/token-refresh.js";
 import { parseBackground } from "../training/background.js";
 import {
   type BodyReading,
@@ -83,7 +84,9 @@ export function startText(chatId: number, offerOnboarding: boolean): string {
     "/status - this week's training, recovery and budget",
     "/import - load 12 months of Strava history (once, after connecting)",
     "/connect - link Strava or Google Calendar",
+    "/reauth - reconnect Strava or Google Calendar when access has expired",
     "/budget - LLM spend this month",
+    "/deep <question> - answer with the stronger model",
   ];
   if (offerOnboarding) {
     lines.push(
@@ -204,7 +207,21 @@ export function stravaConnectedText(): string {
 }
 
 export function stravaRevokedText(): string {
-  return "Strava access was revoked, so I no longer get your activities. Send /connect to link it again.";
+  return "Strava access was revoked, so I no longer get your activities. Send /reauth strava to link it again.";
+}
+
+// A token refresh finally failed (ADR-011, token-refresh.ts). Sent once per failure streak.
+export function tokenRefreshFailureText(
+  provider: "Strava" | "Google Calendar",
+  reason: RefreshFailureReason,
+): string {
+  const command = provider === "Strava" ? "/reauth strava" : "/reauth calendar";
+  const what =
+    provider === "Strava" ? "read your activities" : "read your calendar or book sessions";
+  if (reason === "rejected") {
+    return `${provider} rejected the access renewal (access revoked or expired), so I can't ${what}. Send ${command} to connect it again.`;
+  }
+  return `I couldn't renew ${provider} access: 3 attempts failed (${provider} didn't answer properly). It's logged, and I'll try again next time it's needed. If this keeps coming back, send ${command}.`;
 }
 
 export function activityFailureText(): string {
@@ -224,6 +241,7 @@ const JOB_DESCRIPTIONS: Record<string, string> = {
   "intervals-wellness": "Fetching health data from Intervals.icu",
   "intervals-profile": "Fetching thresholds and zones from Intervals.icu",
   "sunday-recap": "Starting the Sunday recap",
+  "conversation-memory": "Summarizing old conversations",
 };
 
 export function jobFailureText(jobName: string, error: unknown): string {
@@ -337,7 +355,25 @@ export function profileText({
   const availability = profile?.preferences?.availability;
   if (typeof availability === "string") lines.push(`- Availability: ${availability}`);
   if (profile?.injuryNotes) lines.push(`- Injuries: ${profile.injuryNotes}`);
+  lines.push("", "To change something: /profile help, or just tell me in chat.");
   return lines.join("\n");
+}
+
+export function profileEditHelpText(): string {
+  return [
+    "Edit your profile (you confirm each change with a button):",
+    "/profile ftp 250",
+    "/profile lthr run 168  (or bike, swim)",
+    "/profile maxhr 190  (or /profile maxhr run 192)",
+    "/profile pace 4:15  (run threshold pace per km)",
+    "/profile css 1:45  (swim, per 100 m)",
+    "/profile vdot 48.5, or from a race: /profile vdot 10k 45:30",
+    "/profile availability Mon rest, Tue/Thu 6:30-7:45, long ride Sat",
+    "/profile injuries none",
+    "/profile name Alex",
+    "",
+    "Add a date to a threshold when it wasn't today: /profile ftp 250 2026-09-20. Zones follow the thresholds automatically. Goals are set in chat.",
+  ].join("\n");
 }
 
 export function planCommandText(plan: WeekPlan | null, pendingPlan: boolean): string {

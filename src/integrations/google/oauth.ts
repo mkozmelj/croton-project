@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { OAuthTokenStore } from "../../db/oauth-tokens.js";
 import { timeoutSignal } from "../../utils/http.js";
+import { createTokenRefresher, type RefreshAlert } from "../token-refresh.js";
 
 const AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -31,6 +32,10 @@ export type GoogleAuthDeps = {
   tokens: OAuthTokenStore;
   fetch?: typeof fetch;
   now?: () => Date;
+  // Called once per failure streak when a refresh finally fails (token-refresh.ts).
+  onRefreshFailed?: RefreshAlert;
+  retryDelaysMs?: readonly number[];
+  sleep?: (ms: number) => Promise<void>;
 };
 
 export type GoogleAuth = {
@@ -46,6 +51,13 @@ export function createGoogleAuth(deps: GoogleAuthDeps): GoogleAuth {
   const doFetch = deps.fetch ?? fetch;
   const now = deps.now ?? (() => new Date());
   let refreshing: Promise<string> | null = null;
+  const refreshTokens = createTokenRefresher({
+    provider: "google",
+    isRejected: (error) => error instanceof GoogleAuthError,
+    onAlert: deps.onRefreshFailed,
+    delaysMs: deps.retryDelaysMs,
+    sleep: deps.sleep,
+  });
 
   async function requestTokens(params: Record<string, string>) {
     const response = await doFetch(TOKEN_URL, {
@@ -71,10 +83,10 @@ export function createGoogleAuth(deps: GoogleAuthDeps): GoogleAuth {
   async function refresh(): Promise<string> {
     const stored = await deps.tokens.get("google");
     if (!stored) throw new GoogleAuthError("Google Calendar is not connected");
-    const fresh = await requestTokens({
-      grant_type: "refresh_token",
-      refresh_token: stored.refreshToken,
-    });
+    // Transient failures are retried; a final failure alerts the athlete (token-refresh.ts).
+    const fresh = await refreshTokens(() =>
+      requestTokens({ grant_type: "refresh_token", refresh_token: stored.refreshToken }),
+    );
     // ADR-011: always re-save both; Google keeps the refresh token unless it sends a new one.
     await deps.tokens.save("google", {
       ...stored,

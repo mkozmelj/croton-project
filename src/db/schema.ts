@@ -43,6 +43,20 @@ export const conversations = pgTable(
   (table) => [index("conversations_created_at_idx").on(table.createdAt)],
 );
 
+// spec.md §6.2: a summary of conversation turns older than 60 days, which are then deleted
+// (src/agent/memory.ts). ADR-009: upserted on `through_turn_id`, the last turn it covers, so
+// a run that fails between storing the summary and deleting the turns doesn't store it twice.
+export const conversationMemories = pgTable("conversation_memories", {
+  id: serial("id").primaryKey(),
+  throughTurnId: integer("through_turn_id").notNull().unique(),
+  // Local dates of the first and last summarized turn.
+  periodStart: date("period_start", { mode: "string" }).notNull(),
+  periodEnd: date("period_end", { mode: "string" }).notNull(),
+  summary: text("summary").notNull(),
+  turnCount: integer("turn_count").notNull(),
+  createdAt: createdAt(),
+});
+
 // One row per Claude API call. `date` is the local (TIMEZONE) calendar date, so the
 // monthly budget resets at local midnight on the 1st.
 export const llmUsage = pgTable(

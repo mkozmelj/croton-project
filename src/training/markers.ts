@@ -12,7 +12,14 @@ export const MARKER_METRICS = [
   "css_s_per_100m",
   "vdot",
 ] as const;
-export const MARKER_SOURCES = ["intervals", "field_test", "race", "athlete_reported"] as const;
+// `activity`: a workout that clearly beat the current value (breakthroughs.ts).
+export const MARKER_SOURCES = [
+  "intervals",
+  "field_test",
+  "race",
+  "athlete_reported",
+  "activity",
+] as const;
 
 export type MarkerSport = (typeof MARKER_SPORTS)[number];
 export type MarkerMetric = (typeof MARKER_METRICS)[number];
@@ -137,6 +144,7 @@ const SOURCE_LABELS: Record<MarkerSource, string> = {
   field_test: "from a field test",
   race: "from a race",
   athlete_reported: "athlete-reported",
+  activity: "from a hard workout",
 };
 
 export function describeSource(source: MarkerSource): string {

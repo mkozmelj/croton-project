@@ -7,6 +7,10 @@ export const REDACT_PATHS = [
   'req.headers["x-telegram-bot-api-secret-token"]',
   "*.access_token",
   "*.refresh_token",
+  "*.accessToken",
+  "*.refreshToken",
+  "*.client_secret",
+  "*.clientSecret",
   "*.authorization_token",
   "*.apiKey",
   "*.api_key",
@@ -61,12 +65,22 @@ export function serializeError(error: Error, secrets: readonly string[]): unknow
   }
 }
 
+type LoggedRequest = { method?: string; url?: string; ip?: string };
+
+// Fastify's request log without the query string: OAuth callbacks carry the one-time `code`
+// and `state`, and Strava's handshake the verify token. Routes also log those at "warn" only,
+// but this holds even where a route forgets to.
+export function serializeRequest(request: LoggedRequest) {
+  return { method: request.method, url: request.url?.split("?")[0], remoteAddress: request.ip };
+}
+
 export function createLogger({ level, secrets }: LoggerOptions): Logger {
   return pino({
     level,
     redact: { paths: REDACT_PATHS, censor: REDACTED },
     serializers: {
       err: (error: Error) => serializeError(error, secrets),
+      req: serializeRequest,
     },
   });
 }

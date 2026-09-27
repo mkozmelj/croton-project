@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { OAuthTokenStore } from "../../db/oauth-tokens.js";
 import { timeoutSignal } from "../../utils/http.js";
+import { createTokenRefresher, type RefreshAlert } from "../token-refresh.js";
 
 const AUTHORIZE_URL = "https://www.strava.com/oauth/authorize";
 const TOKEN_URL = "https://www.strava.com/oauth/token";
@@ -32,6 +33,10 @@ export type StravaAuthDeps = {
   tokens: OAuthTokenStore;
   fetch?: Fetch;
   now?: () => Date;
+  // Called once per failure streak when a refresh finally fails (token-refresh.ts).
+  onRefreshFailed?: RefreshAlert;
+  retryDelaysMs?: readonly number[];
+  sleep?: (ms: number) => Promise<void>;
 };
 
 export type StravaAuth = {
@@ -48,6 +53,13 @@ export function createStravaAuth(deps: StravaAuthDeps): StravaAuth {
   const doFetch = deps.fetch ?? fetch;
   const now = deps.now ?? (() => new Date());
   let refreshing: Promise<string> | null = null;
+  const refreshTokens = createTokenRefresher({
+    provider: "strava",
+    isRejected: (error) => error instanceof StravaAuthError,
+    onAlert: deps.onRefreshFailed,
+    delaysMs: deps.retryDelaysMs,
+    sleep: deps.sleep,
+  });
 
   async function requestTokens(params: Record<string, string>) {
     const response = await doFetch(TOKEN_URL, {
@@ -73,10 +85,10 @@ export function createStravaAuth(deps: StravaAuthDeps): StravaAuth {
   async function refresh(): Promise<string> {
     const stored = await deps.tokens.get("strava");
     if (!stored) throw new StravaAuthError("Strava is not connected");
-    const fresh = await requestTokens({
-      grant_type: "refresh_token",
-      refresh_token: stored.refreshToken,
-    });
+    // Transient failures are retried; a final failure alerts the athlete (token-refresh.ts).
+    const fresh = await refreshTokens(() =>
+      requestTokens({ grant_type: "refresh_token", refresh_token: stored.refreshToken }),
+    );
     // ADR-011: Strava may rotate the refresh token, so both are always re-saved.
     await deps.tokens.save("strava", {
       ...stored,

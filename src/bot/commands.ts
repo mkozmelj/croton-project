@@ -1,9 +1,11 @@
 import type { Bot } from "grammy";
+import { CONFIRMATION_TTL_MS } from "../agent/actions.js";
 import { totalsBySport } from "../agent/activity-format.js";
 import { BudgetExceededError, budgetLevel } from "../agent/budget.js";
 import type { FitnessService } from "../agent/fitness.js";
 import type { Orchestrator } from "../agent/orchestrator.js";
 import type { Planner } from "../agent/planner.js";
+import { parseProfileEdit } from "../agent/profile-edit.js";
 import { loadSeason } from "../agent/season.js";
 import type { ActivityStore } from "../db/activities.js";
 import type { AthleteProfileStore } from "../db/athlete-profile.js";
@@ -24,6 +26,7 @@ import {
   importText,
   onboardingIntroText,
   planCommandText,
+  profileEditHelpText,
   profileText,
   startText,
   statusText,
@@ -36,12 +39,14 @@ export const COMMANDS = [
   { command: "plan", description: "This week's plan" },
   { command: "tomorrow", description: "Tomorrow's sessions" },
   { command: "goals", description: "Season goals and weeks to go" },
-  { command: "profile", description: "Fitness markers, zones, background" },
+  { command: "profile", description: "Fitness markers, zones, background; /profile help to edit" },
   { command: "onboard", description: "Tell me about your training background" },
   { command: "status", description: "This week's training, recovery and budget" },
   { command: "import", description: "Load 12 months of Strava history" },
   { command: "connect", description: "Link Strava or Google Calendar" },
+  { command: "reauth", description: "Reconnect Strava or Google Calendar" },
   { command: "budget", description: "LLM spend this month" },
+  { command: "deep", description: "Ask with the stronger model: /deep <question>" },
   { command: "start", description: "Welcome and setup info" },
 ] as const;
 
@@ -72,10 +77,12 @@ export type CommandDeps = {
   fitness: Pick<FitnessService, "latest">;
   goals: Pick<GoalStore, "activeInSeasons">;
   plans: Pick<TrainingPlanStore, "forWeek">;
-  pending: Pick<PendingActionStore, "live">;
+  pending: Pick<PendingActionStore, "live" | "create">;
   planner: Pick<Planner, "startRecap" | "generate">;
   onboarding: Pick<Orchestrator, "startOnboarding">;
   importHistory: () => Promise<ImportSummary>;
+  // Starts a background task that fails on purpose (/selftest).
+  runSelfTest: () => void;
   connect: Partial<Record<OAuthProvider, ConnectDeps>>;
   monthlyBudgetEur: number;
   timeZone: string;
@@ -149,7 +156,8 @@ export function registerCommands(bot: Bot, deps: CommandDeps): void {
   });
 
   // `/connect` lists every configured provider; `/connect calendar` or `/connect strava` one.
-  bot.command("connect", async (ctx) => {
+  // `/reauth` is the same flow, named for when access has expired or was revoked (ADR-011).
+  bot.command(["connect", "reauth"], async (ctx) => {
     const arg = ctx.match.trim().toLowerCase();
     const wanted: OAuthProvider[] =
       arg === "calendar" || arg === "google"
@@ -215,6 +223,26 @@ export function registerCommands(bot: Bot, deps: CommandDeps): void {
   });
 
   bot.command("profile", async (ctx) => {
+    const args = ctx.match.trim();
+    if (args === "help") {
+      await ctx.reply(profileEditHelpText());
+      return;
+    }
+    if (args) {
+      const edit = parseProfileEdit(args, today());
+      if (!edit.ok) {
+        await ctx.reply(`${edit.error}\n\n${profileEditHelpText()}`.trim());
+        return;
+      }
+      const proposal = await deps.pending.create({
+        chatId: ctx.chat.id,
+        actionType: edit.actionType,
+        payload: edit.payload,
+        expiresAt: new Date(now().getTime() + CONFIRMATION_TTL_MS),
+      });
+      await replyWithProposals(ctx, { text: "", proposals: [proposal] });
+      return;
+    }
     const instant = now();
     const day = localDate(instant, deps.timeZone);
     const bodyFrom = addDays(weekStart(day), -7 * 7);
@@ -241,6 +269,17 @@ export function registerCommands(bot: Bot, deps: CommandDeps): void {
   bot.command("import", async (ctx) => {
     await ctx.reply("Importing your history. This takes up to a minute…");
     await ctx.reply(importText(await withTyping(ctx, deps.importHistory)));
+  });
+
+  // Not in the command menu: checks the error boundaries end to end (Phase 5 acceptance). The
+  // background failure alerts through the task runner, the thrown error through the bot's
+  // error boundary.
+  bot.command("selftest", async (ctx) => {
+    await ctx.reply(
+      "Self-test: a background task and this command now fail on purpose. Two failure messages should follow.",
+    );
+    deps.runSelfTest();
+    throw new Error("self-test: deliberate failure in the update handler");
   });
 
   bot.command("onboard", async (ctx) => {

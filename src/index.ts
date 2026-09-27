@@ -5,8 +5,9 @@ import { createActivitySummarizer } from "./agent/activity-summary.js";
 import { createCalendarContext } from "./agent/calendar-context.js";
 import { createClaude } from "./agent/claude.js";
 import { createContextBuilder } from "./agent/context.js";
-import { createFieldTestProposer } from "./agent/field-test-proposals.js";
 import { createFitnessService } from "./agent/fitness.js";
+import { createMarkerProposer } from "./agent/marker-proposals.js";
+import { createConversationMemory } from "./agent/memory.js";
 import { createOrchestrator } from "./agent/orchestrator.js";
 import { createPlanBooking } from "./agent/plan-booking.js";
 import { createPlanner } from "./agent/planner.js";
@@ -26,6 +27,7 @@ import {
   serverFailureText,
   stravaConnectedText,
   stravaRevokedText,
+  tokenRefreshFailureText,
 } from "./bot/formatting.js";
 import { createNotifier } from "./bot/notifier.js";
 import { type BotTransport, configureBot, startBot } from "./bot/setup.js";
@@ -34,6 +36,7 @@ import { env } from "./config/env.js";
 import { createActivityStore } from "./db/activities.js";
 import { createAthleteProfileStore } from "./db/athlete-profile.js";
 import { createDatabase, runMigrations } from "./db/client.js";
+import { createConversationMemoryStore } from "./db/conversation-memories.js";
 import { createConversationStore } from "./db/conversations.js";
 import { createFitnessMarkerStore } from "./db/fitness-markers.js";
 import { createGoalStore } from "./db/goals.js";
@@ -71,6 +74,7 @@ import {
 } from "./integrations/strava/history-import.js";
 import { createStravaAuth, StravaAuthError } from "./integrations/strava/oauth.js";
 import { registerStravaWebhook } from "./integrations/strava/webhook.js";
+import { isReportedRefreshFailure } from "./integrations/token-refresh.js";
 import { createOpenAIEmbedder } from "./knowledge/embeddings.js";
 import { createLiteratureSearch } from "./knowledge/literature-search.js";
 import { connectionStringSecrets, createLogger } from "./logging/logger.js";
@@ -78,6 +82,7 @@ import { registerInfoPages } from "./pages.js";
 import { type Job, type Scheduler, startScheduler } from "./scheduler/cron.js";
 import { buildServer } from "./server.js";
 import { createBackgroundTasks } from "./utils/background.js";
+import { processErrorHandlers, withTimeout } from "./utils/process-guards.js";
 
 const logger = createLogger({
   level: env.LOG_LEVEL,
@@ -108,6 +113,15 @@ const usage = createUsageStore(db);
 const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 const notifier = createNotifier(bot.api, env.TELEGRAM_AUTHORIZED_CHAT_ID, logger);
 
+// Stack doc §5: errors that escaped every handler still reach the athlete.
+const guards = processErrorHandlers({
+  logger,
+  notify: notifier.notify,
+  exit: (code) => process.exit(code),
+});
+process.on("unhandledRejection", (reason) => void guards.unhandledRejection(reason));
+process.on("uncaughtException", (error) => void guards.uncaughtException(error));
+
 const claude = createClaude({
   messages: new Anthropic({ apiKey: env.ANTHROPIC_API_KEY }).messages,
   usage,
@@ -129,6 +143,7 @@ const goals = createGoalStore(db);
 const plans = createTrainingPlanStore(db);
 const pending = createPendingActionStore(db);
 const conversations = createConversationStore(db);
+const memories = createConversationMemoryStore(db);
 const context = createContextBuilder({
   profile,
   activities,
@@ -137,6 +152,7 @@ const context = createContextBuilder({
   goals,
   plans,
   pending,
+  memories,
   chatId,
   timeZone: env.TIMEZONE,
 });
@@ -151,12 +167,15 @@ const literature = createLiteratureSearch({
 const tools = createToolHandlers({ pending, goals, plans, literature });
 const tasks = createBackgroundTasks({
   logger,
-  onError: (label) =>
-    notifier.notify(
+  onError: async (label, error) => {
+    // A failed token refresh already alerted once for its failure streak.
+    if (isReportedRefreshFailure(error)) return;
+    await notifier.notify(
       label.startsWith("strava")
         ? activityFailureText()
         : `Background task ${label} failed. It's logged.`,
-    ),
+    );
+  },
 });
 
 // Local dev has no APP_URL; Strava always accepts localhost as a callback domain.
@@ -184,6 +203,8 @@ if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && tokens) {
     clientSecret: env.GOOGLE_CLIENT_SECRET,
     redirectUri: new URL(GOOGLE_AUTH_CALLBACK_PATH, publicUrl).toString(),
     tokens,
+    onRefreshFailed: (reason) =>
+      notifier.notify(tokenRefreshFailureText("Google Calendar", reason)),
   });
   registerGoogleAuthRoutes(app, {
     auth: googleAuth,
@@ -263,7 +284,13 @@ const planner = createPlanner({
   timeZone: env.TIMEZONE,
   logger,
 });
-const fieldTests = createFieldTestProposer({ plans, pending, chatId, timeZone: env.TIMEZONE });
+const markerProposals = createMarkerProposer({
+  plans,
+  pending,
+  fitness,
+  chatId,
+  timeZone: env.TIMEZONE,
+});
 
 let stravaImport: StravaHistoryImport | undefined;
 if (env.STRAVA_CLIENT_ID && env.STRAVA_CLIENT_SECRET && tokens) {
@@ -272,6 +299,7 @@ if (env.STRAVA_CLIENT_ID && env.STRAVA_CLIENT_SECRET && tokens) {
     clientSecret: env.STRAVA_CLIENT_SECRET,
     redirectUri: new URL(STRAVA_AUTH_CALLBACK_PATH, publicUrl).toString(),
     tokens,
+    onRefreshFailed: (reason) => notifier.notify(tokenRefreshFailureText("Strava", reason)),
   });
   registerStravaAuthRoutes(app, {
     auth,
@@ -295,8 +323,10 @@ if (env.STRAVA_CLIENT_ID && env.STRAVA_CLIENT_SECRET && tokens) {
       tokens,
       onNewActivity: async (activity) => {
         await notifier.notify(await summarizer.summarize(activity));
-        // ADR-016: a completed field test proposes its markers.
-        for (const proposal of await fieldTests.propose(activity)) await notifier.propose(proposal);
+        // ADR-016: a completed field test, or a workout that beat a threshold, proposes markers.
+        for (const proposal of await markerProposals.propose(activity)) {
+          await notifier.propose(proposal);
+        }
       },
       onDeauthorized: () => notifier.notify(stravaRevokedText()),
       logger,
@@ -328,6 +358,22 @@ jobs.push({
   cron: "0 19 * * 0",
   run: async () => {
     await notifier.notify(await planner.startRecap());
+  },
+});
+
+// spec.md §6.2: turns older than 60 days become a memory note, monthly (1st, 03:30 local).
+const conversationMemory = createConversationMemory({
+  claude,
+  conversations,
+  memories,
+  timeZone: env.TIMEZONE,
+  logger,
+});
+jobs.push({
+  name: "conversation-memory",
+  cron: "30 3 1 * *",
+  run: async () => {
+    await conversationMemory.consolidate();
   },
 });
 
@@ -390,6 +436,11 @@ configureBot(bot, {
   planner,
   onboarding: orchestrator,
   importHistory,
+  // /selftest: a background task that fails on purpose, to check the alert path end to end.
+  runSelfTest: () =>
+    tasks.run("selftest", async () => {
+      throw new Error("self-test: deliberate failure in a background task");
+    }),
   connect,
   monthlyBudgetEur: env.MONTHLY_LLM_BUDGET_EUR,
   timeZone: env.TIMEZONE,
@@ -435,5 +486,6 @@ try {
   logger.info({ transport: transport.mode, thinkingDisabled: env.DISABLE_THINKING }, "started");
 } catch (error) {
   logger.fatal({ err: error }, "startup failed");
+  await withTimeout(notifier.notify("The app failed to start after a deploy. It's logged."));
   process.exit(1);
 }

@@ -18,6 +18,13 @@ export function inMemoryConversations() {
     async recent(limit: number) {
       return turns.slice(-limit);
     },
+    async olderThan(before: Date, limit: number) {
+      return turns.filter((turn) => turn.createdAt < before).slice(0, limit);
+    },
+    async deleteThrough(throughId: number, before: Date) {
+      const kept = turns.filter((turn) => !(turn.id <= throughId && turn.createdAt < before));
+      turns.splice(0, turns.length, ...kept);
+    },
   };
 }
 

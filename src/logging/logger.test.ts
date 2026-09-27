@@ -1,7 +1,14 @@
 import { Writable } from "node:stream";
+import Fastify from "fastify";
 import { pino } from "pino";
 import { describe, expect, it } from "vitest";
-import { connectionStringSecrets, REDACT_PATHS, scrubSecrets, serializeError } from "./logger.js";
+import {
+  connectionStringSecrets,
+  REDACT_PATHS,
+  scrubSecrets,
+  serializeError,
+  serializeRequest,
+} from "./logger.js";
 
 function captureLogger() {
   const lines: string[] = [];
@@ -11,7 +18,13 @@ function captureLogger() {
       callback();
     },
   });
-  const logger = pino({ redact: { paths: REDACT_PATHS, censor: "[Redacted]" } }, stream);
+  const logger = pino(
+    {
+      redact: { paths: REDACT_PATHS, censor: "[Redacted]" },
+      serializers: { req: serializeRequest },
+    },
+    stream,
+  );
   return { logger, output: () => lines.join("") };
 }
 
@@ -29,6 +42,25 @@ describe("logger redaction", () => {
       expect(text).not.toContain(secret);
     }
     expect(text).toContain("[Redacted]");
+  });
+});
+
+describe("request logging", () => {
+  it("never logs a query string, which can carry OAuth codes and verify tokens", async () => {
+    const { logger, output } = captureLogger();
+    const app = Fastify({ loggerInstance: logger });
+    app.get("/auth/strava/callback", async () => "ok");
+    await app.inject({ url: "/auth/strava/callback?code=one-time-code&state=st4te" });
+    expect(output()).toContain('"url":"/auth/strava/callback"');
+    expect(output()).not.toContain("one-time-code");
+    expect(output()).not.toContain("st4te");
+  });
+
+  it("redacts camelCase token fields", () => {
+    const { logger, output } = captureLogger();
+    logger.info({ stored: { accessToken: "at-789", refreshToken: "rt-012" } });
+    expect(output()).not.toContain("at-789");
+    expect(output()).not.toContain("rt-012");
   });
 });
 

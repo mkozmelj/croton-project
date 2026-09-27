@@ -5,21 +5,26 @@ import type {
   ToolResultBlockParam,
 } from "@anthropic-ai/sdk/resources/messages/messages";
 import type { Logger } from "pino";
-import type { ConversationStore } from "../db/conversations.js";
+import { MODELS } from "../config/env.js";
+import type { ConversationStore, ConversationTurn } from "../db/conversations.js";
 import type { PendingActionRow, PendingActionStore } from "../db/pending-actions.js";
 import { localDate } from "../utils/dates.js";
 import { ONBOARDING_TTL_MS, recapPayload } from "./actions.js";
-import type { Claude } from "./claude.js";
+import { type RoutedCallType, routeMessage } from "./classifier.js";
+import { CALL_POLICIES, type Claude } from "./claude.js";
 import type { ContextBuilder } from "./context.js";
 import { HISTORY_LIMIT, textOf, toMessageParams } from "./history.js";
 import type { Planner } from "./planner.js";
 import type { Reply } from "./reply.js";
 import { runToolCall, type ToolHandlers } from "./tool-handlers.js";
-import { CHAT_TOOLS } from "./tools.js";
+import { CHAT_TOOLS, TOOL_NAMES } from "./tools.js";
 
 // Tool rounds per message before the model has to answer in text. Proposals are one call
 // each, so a full onboarding (profile + a few markers) fits.
 export const MAX_TOOL_ROUNDS = 4;
+
+// A short message this soon after a Sonnet reply is treated as part of that conversation.
+export const FOLLOW_UP_WINDOW_MS = 15 * 60 * 1000;
 
 type OrchestratorDeps = {
   claude: Pick<Claude, "call">;
@@ -37,6 +42,8 @@ type OrchestratorDeps = {
 export type IncomingMessage = {
   text: string;
   telegramMessageId: number;
+  // `/deep <message>`: force Sonnet at medium effort.
+  deep?: boolean;
 };
 
 export type Orchestrator = {
@@ -45,20 +52,35 @@ export type Orchestrator = {
   startOnboarding(): Promise<void>;
 };
 
-// Until the Phase 5 router: every free-text message is a `chat` call (Sonnet, low effort —
-// the same policy as `plan_adjustment`, which is what mid-week plan changes are). An open
+const isHaiku = (callType: RoutedCallType) => CALL_POLICIES[callType].model === MODELS.haiku;
+
+// Every free-text message is routed (classifier.ts) to a Sonnet or Haiku call type. An open
 // recap turns the message into plan generation instead.
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const now = deps.now ?? (() => new Date());
 
-  async function chat({ text, telegramMessageId }: IncomingMessage, onboarding: boolean) {
+  // The previous reply (before the message just stored) was Sonnet's, and recent.
+  function followsSonnet(turns: readonly ConversationTurn[]): boolean {
+    const previous = turns.slice(0, -1).findLast((turn) => turn.role === "assistant");
+    return (
+      previous?.model === MODELS.sonnet &&
+      now().getTime() - previous.createdAt.getTime() < FOLLOW_UP_WINDOW_MS
+    );
+  }
+
+  async function chat({ text, telegramMessageId, deep }: IncomingMessage, onboarding: boolean) {
     await deps.conversations.append({
       role: "user",
       content: [{ type: "text", text }],
       telegramMessageId,
     });
 
-    let messages: MessageParam[] = toMessageParams(await deps.conversations.recent(HISTORY_LIMIT));
+    const turns = await deps.conversations.recent(HISTORY_LIMIT);
+    const route = routeMessage({ text, deep, onboarding, followsSonnet: followsSonnet(turns) });
+    let callType = route.callType;
+    deps.logger?.info({ module: "router", callType, reason: route.reason }, "message routed");
+
+    let messages: MessageParam[] = toMessageParams(turns);
     const dynamicContext = await deps.context.build({ onboarding });
     const proposals: PendingActionRow[] = [];
     const texts: string[] = [];
@@ -66,12 +88,23 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
       const { message, model } = await deps.claude.call({
-        callType: "chat",
+        callType,
         messages,
         dynamicContext,
         tools: CHAT_TOOLS,
         toolChoice: { type: round === MAX_TOOL_ROUNDS ? "none" : "auto" },
       });
+      // Review doc #13: a week plan is never written by Haiku. A misrouted plan change is
+      // redone on Sonnet, and Haiku's attempt is dropped.
+      if (
+        isHaiku(callType) &&
+        message.content.some((block) => block.type === "tool_use" && block.name === TOOL_NAMES.plan)
+      ) {
+        deps.logger?.info({ module: "router", from: callType }, "escalated plan change to Sonnet");
+        callType = "plan_adjustment";
+        round--;
+        continue;
+      }
       last = message;
       // ADR-003: the full block array exactly as received (thinking and tool_use included).
       const content = message.content as ContentBlockParam[];

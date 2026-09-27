@@ -1,5 +1,6 @@
 import type { ActivityStore, ActivitySummary } from "../db/activities.js";
 import type { AthleteProfile, AthleteProfileStore } from "../db/athlete-profile.js";
+import type { ConversationMemory, ConversationMemoryStore } from "../db/conversation-memories.js";
 import type { StoredMarker } from "../db/fitness-markers.js";
 import type { GoalStore, GoalWithEvent } from "../db/goals.js";
 import type { HealthMetrics, HealthMetricsStore } from "../db/health-metrics.js";
@@ -47,6 +48,8 @@ const HEALTH_DAYS = 7;
 const BASELINE_WEEKS = 6;
 // Weekly body-composition averages shown (this week included).
 const BODY_WEEKS = 8;
+// Monthly conversation summaries shown (spec.md §6.2): about half a year.
+const MEMORY_NOTES = 6;
 
 type ContextDeps = {
   profile: Pick<AthleteProfileStore, "get">;
@@ -56,6 +59,7 @@ type ContextDeps = {
   goals: Pick<GoalStore, "activeInSeasons">;
   plans: Pick<TrainingPlanStore, "forWeek">;
   pending: Pick<PendingActionStore, "live">;
+  memories: Pick<ConversationMemoryStore, "recent">;
   chatId: number;
   timeZone: string;
   now?: () => Date;
@@ -91,7 +95,7 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
       // Plan generation also gets the year behind (monthly totals and peaks).
       const activitiesFrom = options.detail === "baseline" ? historyStart(thisWeek) : baselineFrom;
 
-      const [profile, activities, health, markers, season, thisPlan, nextPlan, pending] =
+      const [profile, activities, health, markers, season, thisPlan, nextPlan, pending, memories] =
         await Promise.all([
           deps.profile.get(),
           deps.activities.between(localMidnight(activitiesFrom, deps.timeZone), instant),
@@ -101,6 +105,7 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
           deps.plans.forWeek(thisWeek),
           deps.plans.forWeek(nextWeek),
           deps.pending.live(deps.chatId, CONFIRMATION_TYPES),
+          deps.memories.recent(MEMORY_NOTES),
         ]);
 
       const dayOf = (at: Date) => localDate(at, deps.timeZone);
@@ -203,6 +208,7 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
             .map((row) => `- ${row.date}: ${describeHealth(row)}`),
           "- no data",
         ),
+        ...memoryLines(memories),
         ...(options.onboarding ? ["", ...ONBOARDING_LINES] : []),
       ];
       return lines.join("\n");
@@ -211,6 +217,16 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
 }
 
 const orNone = (lines: string[], none: string) => (lines.length > 0 ? lines : [none]);
+
+// Older conversations, summarized monthly; the raw turns are gone.
+function memoryLines(memories: readonly ConversationMemory[]): string[] {
+  if (memories.length === 0) return [];
+  return [
+    "",
+    "MEMORY OF OLDER CONVERSATIONS (your own monthly notes, oldest first)",
+    ...memories.map((m) => `${m.periodStart} to ${m.periodEnd}:\n${m.summary.trim()}`),
+  ];
+}
 
 function bodyLines(readings: readonly BodyReading[], from: string): string[] {
   const weeks = weeklyBody(readings, from, BODY_WEEKS);

@@ -32,16 +32,20 @@ type CallPolicy = {
   maxTokens: number;
 };
 
-// ADR-005. `chat` is the unclassified free-text path used until the Phase 5 router
-// exists: Sonnet (review doc #13's "default to Sonnet when uncertain") at low effort.
+// ADR-005. `chat` is what the router (classifier.ts) picks when a message touches training
+// but isn't clearly a plan change or an analysis: Sonnet (review doc #13's "default to Sonnet
+// when uncertain") at low effort. `deep` is `/deep <message>`.
 export const CALL_POLICIES = {
   chat: { model: MODELS.sonnet, effort: "low", maxTokens: 16_000 },
   plan_generation: { model: MODELS.sonnet, effort: "medium", maxTokens: 16_000 },
   plan_adjustment: { model: MODELS.sonnet, effort: "low", maxTokens: 16_000 },
   analysis: { model: MODELS.sonnet, effort: "medium", maxTokens: 16_000 },
+  deep: { model: MODELS.sonnet, effort: "medium", maxTokens: 16_000 },
   quick_chat: { model: MODELS.haiku, maxTokens: 4_000 },
   activity_summary: { model: MODELS.haiku, maxTokens: 2_000 },
   knowledge_qa: { model: MODELS.haiku, maxTokens: 4_000 },
+  // Monthly memory job (spec.md §6.2).
+  conversation_summary: { model: MODELS.haiku, maxTokens: 2_000 },
 } as const satisfies Record<string, CallPolicy>;
 
 export type CallType = keyof typeof CALL_POLICIES;

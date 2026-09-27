@@ -2,7 +2,12 @@ import type { Message } from "@anthropic-ai/sdk/resources/messages/messages";
 import { describe, expect, it } from "vitest";
 import { MODELS } from "../config/env.js";
 import type { ClaudeRequest } from "./claude.js";
-import { createOrchestrator, MAX_TOOL_ROUNDS, replyText } from "./orchestrator.js";
+import {
+  createOrchestrator,
+  FOLLOW_UP_WINDOW_MS,
+  MAX_TOOL_ROUNDS,
+  replyText,
+} from "./orchestrator.js";
 import { inMemoryConversations, inMemoryPending } from "./test-helpers.js";
 import type { ToolHandlers } from "./tool-handlers.js";
 
@@ -32,6 +37,19 @@ const toolReply = {
   ],
   stop_reason: "tool_use",
   usage: { input_tokens: 10, output_tokens: 5 },
+} as unknown as Message;
+
+const planToolReply = {
+  ...toolReply,
+  content: [
+    {
+      type: "tool_use",
+      id: "toolu_2",
+      name: "propose_week_plan",
+      input: {},
+      caller: null,
+    },
+  ],
 } as unknown as Message;
 
 function setup(replies: Message[], tools?: ToolHandlers) {
@@ -159,6 +177,45 @@ describe("createOrchestrator().handleMessage", () => {
     await orchestrator.startOnboarding();
     await orchestrator.handleMessage({ text: "hi", telegramMessageId: 1 });
     expect(calls[0]?.dynamicContext).toBe('CONTEXT {"onboarding":true}');
+  });
+});
+
+describe("model routing", () => {
+  it("sends small talk to Haiku and training questions to Sonnet", async () => {
+    const { orchestrator, calls } = setup([textReply("ok")]);
+    await orchestrator.handleMessage({ text: "Thanks!", telegramMessageId: 1 });
+    await orchestrator.handleMessage({ text: "Move Friday's run to Sunday", telegramMessageId: 2 });
+    expect(calls.map((c) => c.callType)).toEqual(["quick_chat", "plan_adjustment"]);
+  });
+
+  it("forces Sonnet for /deep", async () => {
+    const { orchestrator, calls } = setup([textReply("ok")]);
+    await orchestrator.handleMessage({ text: "hi", telegramMessageId: 1, deep: true });
+    expect(calls[0]?.callType).toBe("deep");
+  });
+
+  it("keeps a short follow-up to a recent Sonnet reply on Sonnet", async () => {
+    const { orchestrator, calls, conversations } = setup([textReply("ok")]);
+    await conversations.append({ role: "user", content: [{ type: "text", text: "x" }] });
+    await conversations.append({
+      role: "assistant",
+      content: [{ type: "text", text: "Shall I move it?" }],
+      model: MODELS.sonnet,
+    });
+    const reply = conversations.turns[1];
+    if (reply) reply.createdAt = new Date(NOW.getTime() - FOLLOW_UP_WINDOW_MS + 60_000);
+
+    await orchestrator.handleMessage({ text: "yes please", telegramMessageId: 1 });
+    expect(calls[0]?.callType).toBe("chat");
+  });
+
+  it("redoes a week-plan proposal from Haiku on Sonnet and drops Haiku's attempt", async () => {
+    const { orchestrator, calls, conversations } = setup([planToolReply, textReply("Done.")]);
+    const reply = await orchestrator.handleMessage({ text: "Why?", telegramMessageId: 1 });
+    expect(calls.map((c) => c.callType)).toEqual(["knowledge_qa", "plan_adjustment"]);
+    expect(reply.text).toBe("Done.");
+    expect(calls[1]?.messages).toEqual(calls[0]?.messages);
+    expect(conversations.turns.map((t) => t.role)).toEqual(["user", "assistant"]);
   });
 });
 

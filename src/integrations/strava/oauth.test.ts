@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { TokenRefreshError } from "../token-refresh.js";
 import { createStravaAuth, hasActivityScope, StravaAuthError } from "./oauth.js";
 import { inMemoryTokens } from "./test-fixtures.js";
 
@@ -31,6 +32,7 @@ function setup(expiresInMs: number, respond = () => tokenResponse()) {
     scope: "read,activity:read_all",
   });
   const { fetch, requests } = fakeFetch(respond);
+  const alerts: string[] = [];
   const auth = createStravaAuth({
     clientId: "1",
     clientSecret: "fake-secret",
@@ -38,8 +40,12 @@ function setup(expiresInMs: number, respond = () => tokenResponse()) {
     tokens: tokens.store,
     fetch,
     now: () => NOW,
+    onRefreshFailed: async (reason) => {
+      alerts.push(reason);
+    },
+    sleep: async () => {},
   });
-  return { auth, tokens, requests };
+  return { auth, tokens, requests, alerts };
 }
 
 describe("createStravaAuth().accessToken", () => {
@@ -68,9 +74,33 @@ describe("createStravaAuth().accessToken", () => {
     expect(requests).toHaveLength(1);
   });
 
-  it("raises StravaAuthError when the refresh token is rejected", async () => {
-    const { auth } = setup(0, () => new Response("{}", { status: 400 }));
+  it("raises StravaAuthError when the refresh token is rejected, and alerts once", async () => {
+    const { auth, requests, alerts } = setup(0, () => new Response("{}", { status: 400 }));
     await expect(auth.accessToken()).rejects.toThrow(StravaAuthError);
+    await expect(auth.accessToken()).rejects.toThrow(StravaAuthError);
+    expect(requests).toHaveLength(2); // no retries for a rejected grant
+    expect(alerts).toEqual(["rejected"]);
+  });
+
+  // Phase 5 acceptance: an expired token whose refresh keeps failing retries, then alerts.
+  it("retries an unavailable token endpoint, then alerts and keeps the stored tokens", async () => {
+    const { auth, requests, alerts, tokens } = setup(
+      -60_000,
+      () => new Response("", { status: 503 }),
+    );
+    await expect(auth.accessToken()).rejects.toThrow(TokenRefreshError);
+    expect(requests).toHaveLength(3);
+    expect(alerts).toEqual(["unavailable"]);
+    expect(tokens.current()?.refreshToken).toBe("old-refresh");
+  });
+
+  it("recovers when a retry succeeds", async () => {
+    let calls = 0;
+    const { auth, alerts } = setup(-60_000, () =>
+      ++calls < 3 ? new Response("", { status: 502 }) : tokenResponse(),
+    );
+    expect(await auth.accessToken()).toBe("new-access");
+    expect(alerts).toEqual([]);
   });
 
   it("raises StravaAuthError when nothing is connected", async () => {

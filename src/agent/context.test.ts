@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Activity } from "../db/activities.js";
+import type { ConversationMemory } from "../db/conversation-memories.js";
 import type { StoredMarker } from "../db/fitness-markers.js";
 import type { GoalWithEvent } from "../db/goals.js";
 import type { HealthMetrics } from "../db/health-metrics.js";
@@ -78,7 +79,11 @@ function goal(priority: "A" | "B" | "C", name: string, date: string): GoalWithEv
   };
 }
 
-type Extras = { markers?: StoredMarker[]; goals?: GoalWithEvent[] };
+type Extras = {
+  markers?: StoredMarker[];
+  goals?: GoalWithEvent[];
+  memories?: ConversationMemory[];
+};
 
 function builder(activities: Activity[], rows: HealthMetrics[] = [], extras: Extras = {}) {
   const ranges: [Date, Date][] = [];
@@ -95,6 +100,7 @@ function builder(activities: Activity[], rows: HealthMetrics[] = [], extras: Ext
     goals: { activeInSeasons: async () => extras.goals ?? [] },
     plans: { forWeek: async () => null },
     pending: { live: async () => [] },
+    memories: { recent: async () => extras.memories ?? [] },
     chatId: 1,
     timeZone: "Europe/Ljubljana",
     now: () => NOW,
@@ -103,6 +109,26 @@ function builder(activities: Activity[], rows: HealthMetrics[] = [], extras: Ext
 }
 
 describe("createContextBuilder().build", () => {
+  it("adds the memory of older conversations only when there is one", async () => {
+    expect(await builder([]).context.build()).not.toContain("MEMORY OF OLDER");
+    const { context } = builder([], [], {
+      memories: [
+        {
+          id: 1,
+          throughTurnId: 80,
+          periodStart: "2026-06-01",
+          periodEnd: "2026-06-30",
+          summary: "- 2026-06-12: left calf niggle after track work, eased by rest\n",
+          turnCount: 80,
+          createdAt: NOW,
+        },
+      ],
+    });
+    expect(await context.build()).toContain(
+      "MEMORY OF OLDER CONVERSATIONS (your own monthly notes, oldest first)\n2026-06-01 to 2026-06-30:\n- 2026-06-12: left calf niggle after track work, eased by rest",
+    );
+  });
+
   it("fetches six weeks back from this week's Monday", async () => {
     const { context, ranges } = builder([]);
     await context.build();
