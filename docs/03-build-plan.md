@@ -150,14 +150,14 @@ Concrete, sequential implementation checklist. Supersedes `spec.md` §13's phase
 
 **Acceptance:** Force a Strava token to expire and confirm the retry-then-alert path fires correctly. Force an unhandled exception in a webhook handler and confirm a Telegram alert arrives instead of a silent failure.
 
-**Status: implemented (2026-09-27), not yet deployed or acceptance-checked.** `npm run check` passes (411 tests). Unit tests cover the retry path, since Strava's token endpoint can't be made to return 5xx on purpose: 503 three times → one "unavailable" alert, tokens unchanged; 502, 502, 200 → recovers silently; 400 → no retry, one "rejected" alert.
+**Status: done (2026-09-27).** Deployed, and the athlete ran the acceptance checks below in production and reported them passing. `npm run check` passes (411 tests). Unit tests cover the retry path, since Strava's token endpoint can't be made to return 5xx on purpose: 503 three times → one "unavailable" alert, tokens unchanged; 502, 502, 200 → recovers silently; 400 → no retry, one "rejected" alert.
 
-**How to run the acceptance checks in production (after deploying):**
+**Acceptance checks (run in production, 2026-09-27):**
 1. **Refresh works after expiry:** in the Neon SQL editor, `UPDATE oauth_tokens SET expires_at = now() - interval '1 hour' WHERE provider = 'strava';` then send `/import`. It should report activities, and `expires_at` should be about 6 hours ahead again.
 2. **Refresh failure alerts:** expire the token again as in step 1, set `STRAVA_CLIENT_SECRET` to a wrong value in Railway (a redeploy follows), and send `/import`. Strava rejects the refresh, and one "Strava rejected the access renewal … /reauth strava" message arrives. `/import` a second time sends no second alert (one per streak). Then restore the real secret. No `/reauth` is needed afterwards, because the stored refresh token was never replaced.
 3. **Unhandled exception in a webhook handler:** send `/selftest`. You should get "Self-test: …", then "Background task selftest failed. It's logged." (the background-task boundary) and "Something broke while handling that message …" (the update handler's boundary). Railway logs show both errors with `module` fields.
 
-**Manual steps needed:** none beyond deploying (migration `0005` runs on boot) and the checks above.
+**Manual steps needed:** none (migration `0005` runs on boot).
 
 ---
 
