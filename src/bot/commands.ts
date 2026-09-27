@@ -26,8 +26,10 @@ import {
   importText,
   onboardingIntroText,
   planCommandText,
+  profileEditErrorText,
   profileEditHelpText,
   profileText,
+  recapQuestionText,
   startText,
   statusText,
   tomorrowText,
@@ -189,7 +191,7 @@ export function registerCommands(bot: Bot, deps: CommandDeps): void {
   bot.command("recap", async (ctx) => {
     const feedback = ctx.match.trim();
     if (!feedback) {
-      await ctx.reply(await deps.planner.startRecap());
+      await ctx.reply(recapQuestionText((await deps.planner.startRecap()).weekStart));
       return;
     }
     try {
@@ -231,7 +233,7 @@ export function registerCommands(bot: Bot, deps: CommandDeps): void {
     if (args) {
       const edit = parseProfileEdit(args, today());
       if (!edit.ok) {
-        await ctx.reply(`${edit.error}\n\n${profileEditHelpText()}`.trim());
+        await ctx.reply(profileEditErrorText(edit.error));
         return;
       }
       const proposal = await deps.pending.create({
@@ -267,7 +269,7 @@ export function registerCommands(bot: Bot, deps: CommandDeps): void {
   });
 
   bot.command("import", async (ctx) => {
-    await ctx.reply("Importing your history. This takes up to a minute…");
+    await ctx.reply("📥 Importing your history. This takes up to a minute…");
     await ctx.reply(importText(await withTyping(ctx, deps.importHistory)));
   });
 

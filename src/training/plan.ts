@@ -67,12 +67,21 @@ export const weekPlanSchema = z.object({
 
 export type WeekPlanInput = z.infer<typeof weekPlanSchema>;
 
-// Stored workouts also carry their Google Calendar event, once booked.
-export type Workout = WorkoutInput & { calendar_event_id?: string | null };
+// Stored workouts also carry their Google Calendar event, once booked, and the Strava
+// activity that fulfilled them, once one is matched (plan-match.ts).
+export type Workout = WorkoutInput & {
+  calendar_event_id?: string | null;
+  strava_activity_id?: string | null;
+};
 export type WeekPlan = Omit<WeekPlanInput, "workouts"> & { workouts: Workout[] };
 
 const storedPlanSchema = weekPlanSchema.extend({
-  workouts: z.array(workoutSchema.extend({ calendar_event_id: z.string().nullish() })),
+  workouts: z.array(
+    workoutSchema.extend({
+      calendar_event_id: z.string().nullish(),
+      strava_activity_id: z.string().nullish(),
+    }),
+  ),
 });
 
 export function parseWeekPlan(value: unknown): WeekPlan | null {

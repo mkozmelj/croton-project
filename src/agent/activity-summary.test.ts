@@ -33,11 +33,11 @@ describe("createActivitySummarizer().summarize", () => {
     expect(JSON.stringify(requests[0]?.messages)).toContain('run \\"Test Tempo\\": 8.10 km');
   });
 
-  it("falls back to a plain line when the budget is exhausted", async () => {
+  it("returns no comment when the budget is exhausted", async () => {
     const text = await summarizer(async () => {
       throw new BudgetExceededError("stopped", 14);
     }).summarize(storedActivity());
-    expect(text).toMatch(/^New activity synced: Tue 22 Sept, 07:00: run "Test Tempo"/);
+    expect(text).toBeNull();
   });
 
   it("lets other errors through to the caller's error boundary", async () => {

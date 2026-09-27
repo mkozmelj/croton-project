@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TokenRefreshError } from "../token-refresh.js";
-import { createStravaAuth, hasActivityScope, StravaAuthError } from "./oauth.js";
+import { createStravaAuth, hasActivityScope, hasWriteScope, StravaAuthError } from "./oauth.js";
 import { inMemoryTokens } from "./test-fixtures.js";
 
 const NOW = new Date("2026-09-24T10:00:00Z");
@@ -128,7 +128,7 @@ describe("authorizeUrl", () => {
   it("carries the state, scopes and callback", () => {
     const url = new URL(setup(0).auth.authorizeUrl("abc"));
     expect(url.searchParams.get("state")).toBe("abc");
-    expect(url.searchParams.get("scope")).toBe("read,activity:read_all");
+    expect(url.searchParams.get("scope")).toBe("read,activity:read_all,activity:write");
     expect(url.searchParams.get("redirect_uri")).toBe("http://localhost:3000/auth/strava/callback");
   });
 });
@@ -138,5 +138,14 @@ describe("hasActivityScope", () => {
     expect(hasActivityScope("read,activity:read_all")).toBe(true);
     expect(hasActivityScope("read,activity:read")).toBe(true);
     expect(hasActivityScope("read")).toBe(false);
+  });
+});
+
+describe("hasWriteScope / canWriteActivities", () => {
+  it("needs activity:write, which older connections don't have", async () => {
+    expect(hasWriteScope("read,activity:read_all,activity:write")).toBe(true);
+    expect(hasWriteScope("read,activity:read_all")).toBe(false);
+    const { auth } = setup(60 * 60 * 1000);
+    expect(await auth.canWriteActivities()).toBe(false);
   });
 });

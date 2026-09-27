@@ -8,7 +8,7 @@ import {
   MAX_TOOL_ROUNDS,
   replyText,
 } from "./orchestrator.js";
-import { inMemoryConversations, inMemoryPending } from "./test-helpers.js";
+import { inMemoryConversations, inMemoryFeedback, inMemoryPending } from "./test-helpers.js";
 import type { ToolHandlers } from "./tool-handlers.js";
 
 const CHAT_ID = 42;
@@ -57,6 +57,7 @@ function setup(replies: Message[], tools?: ToolHandlers) {
   const pending = inMemoryPending(() => NOW);
   const calls: ClaudeRequest[] = [];
   const planned: { feedback: string; weekStart?: string }[] = [];
+  const feedback = inMemoryFeedback([1]);
   const orchestrator = createOrchestrator({
     conversations,
     claude: {
@@ -76,11 +77,12 @@ function setup(replies: Message[], tools?: ToolHandlers) {
         return { text: "Plan ready", proposals: [] };
       },
     },
+    feedback: feedback.store,
     chatId: CHAT_ID,
     timeZone: "Europe/Ljubljana",
     now: () => NOW,
   });
-  return { orchestrator, conversations, calls, pending, planned };
+  return { orchestrator, conversations, calls, pending, planned, feedback };
 }
 
 describe("createOrchestrator().handleMessage", () => {
@@ -170,6 +172,45 @@ describe("createOrchestrator().handleMessage", () => {
     expect(planned).toEqual([{ feedback: "Good week", weekStart: "2026-09-28" }]);
     await orchestrator.handleMessage({ text: "Thanks", telegramMessageId: 2 });
     expect(calls).toHaveLength(1); // the second message is plain chat
+  });
+
+  it("stores the message after an 'Add a note' tap on the activity, without a model call", async () => {
+    const { orchestrator, pending, feedback, calls, conversations } = setup([textReply("chat")]);
+    // A recap is open too: the note, tapped more recently, comes first.
+    for (const [actionType, payload] of [
+      ["recap", { weekStart: "2026-09-28" }],
+      ["activity_feedback", { activityId: 1, field: "painNote" }],
+    ] as const) {
+      await pending.store.create({
+        chatId: CHAT_ID,
+        actionType,
+        payload,
+        expiresAt: new Date(NOW.getTime() + 60_000),
+      });
+    }
+
+    const reply = await orchestrator.handleMessage({
+      text: " left calf, tight after 5 km ",
+      telegramMessageId: 1,
+    });
+    expect(reply.text).toContain("Noted");
+    expect(feedback.rows.get(1)?.painNote).toBe("left calf, tight after 5 km");
+    expect(calls).toHaveLength(0);
+    expect(conversations.turns).toHaveLength(0);
+    expect(pending.rows().map((row) => row.actionType)).toEqual(["recap"]);
+  });
+
+  it("says so when the activity for a note was deleted", async () => {
+    const { orchestrator, pending, feedback } = setup([textReply("chat")]);
+    await pending.store.create({
+      chatId: CHAT_ID,
+      actionType: "activity_feedback",
+      payload: { activityId: 99, field: "note" },
+      expiresAt: new Date(NOW.getTime() + 60_000),
+    });
+    const reply = await orchestrator.handleMessage({ text: "felt great", telegramMessageId: 1 });
+    expect(reply.text).toContain("wasn't saved");
+    expect(feedback.rows.size).toBe(0);
   });
 
   it("adds the onboarding checklist while onboarding runs", async () => {

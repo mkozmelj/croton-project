@@ -34,7 +34,7 @@ export const PLANNER_TOOL_ROUNDS = 2;
 
 // Structured output of plan generation (stack doc §6): the recap message and the plan.
 export const recapOutputSchema = z.object({
-  recap: z.string().describe("The Telegram recap message, plain text"),
+  recap: z.string().describe("The Telegram recap message, light Markdown"),
   plan: weekPlanSchema,
 });
 
@@ -56,8 +56,8 @@ type PlannerDeps = {
 
 export type Planner = {
   // Opens the recap: the next message from the athlete is the week's feedback. Returns the
-  // question to send.
-  startRecap(): Promise<string>;
+  // week the plan will be for (the bot words the question).
+  startRecap(): Promise<{ weekStart: string }>;
   // Generates the recap and next plan (Sonnet, medium effort, ADR-005 `plan_generation`) and
   // leaves the plan as a proposal to confirm (ADR-007).
   generate(request: { feedback: string; weekStart?: string }): Promise<Reply>;
@@ -127,11 +127,7 @@ export function createPlanner(deps: PlannerDeps): Planner {
         payload: recapPayload.parse({ weekStart: target }),
         expiresAt: new Date(now().getTime() + RECAP_TTL_MS),
       });
-      return [
-        `Weekly recap time. How did the week go? Any niggles, fatigue, illness, or things I should know about the week of Mon ${target} (travel, busy days, a race)?`,
-        "",
-        "Your next message is the feedback I'll plan from.",
-      ].join("\n");
+      return { weekStart: target };
     },
 
     async generate({ feedback, weekStart: requested }) {
@@ -155,7 +151,7 @@ export function createPlanner(deps: PlannerDeps): Planner {
           : "(Calendar not connected: no information on the athlete's other appointments.)",
         "",
         `Plan the week Mon ${target} to Sun ${end}.${target <= today ? ` Only plan days from ${today} on; the week has already started.` : ""}`,
-        "recap: the Telegram message. Open with any missing or stale fitness markers and the field test you scheduled for each. Then review last week (planned vs actual per sport, key sessions, intensity distribution), recovery (HRV, sleep, resting HR, ACWR), and the plan's focus and reasoning (phase, load progression of at most 10%, whether a recovery week is due). Plain text, short paragraphs, no Markdown, no session list (the plan is shown below it). 120-300 words.",
+        "recap: the Telegram message. Open with any missing or stale fitness markers and the field test you scheduled for each. Then review last week (planned vs actual per sport, key sessions, intensity distribution), recovery (HRV, sleep, resting HR, ACWR, and the athlete's own session feedback: RPE and session RPE load, how sessions felt, any pain reported), and the plan's focus and reasoning (phase, load progression of at most 10%, whether a recovery week is due). Short paragraphs, each opening with a bold label (e.g. **Last week:**, **Recovery:**, **This week:**), no headings or tables, no session list (the plan is shown below it). 120-300 words.",
         "plan: every session of the week with start times that fit the athlete's availability and calendar, targets from the athlete's own zones (RPE where a sport has no anchor), field_test set on test sessions, B/C races handled per their priority. Rest days have no sessions.",
         "The TRAINING PRINCIPLES normally suffice. Use search_literature only when a decision this week needs a source (e.g. taper length before a race); cite what you use in the recap.",
       ].join("\n");

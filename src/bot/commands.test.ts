@@ -50,7 +50,7 @@ describe("/selftest", () => {
     expect(selfTests()).toBe(1);
     expect(sent().map((m) => m.text)).toEqual([
       expect.stringMatching(/^Self-test/),
-      expect.stringMatching(/^Something broke/),
+      expect.stringMatching(/^⚠️ Something broke/),
     ]);
   });
 });

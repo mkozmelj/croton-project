@@ -32,14 +32,14 @@ export function processErrorHandlers(deps: GuardDeps) {
       if (now() - lastRejectionAlert < REJECTION_ALERT_INTERVAL_MS) return;
       lastRejectionAlert = now();
       await withTimeout(
-        deps.notify("Something failed in the background without being handled. It's logged."),
+        deps.notify("⚠️ Something failed in the background without being handled. It's logged."),
       );
     },
 
     async uncaughtException(error: unknown) {
       log.fatal({ err: error }, "uncaught exception, exiting");
       await withTimeout(
-        deps.notify("The app hit an unexpected error and is restarting. It's logged."),
+        deps.notify("⚠️ The app hit an unexpected error and is restarting. It's logged."),
       );
       deps.exit(1);
     },

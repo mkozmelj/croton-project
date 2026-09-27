@@ -1,7 +1,6 @@
 import { type Bot, type Context, InlineKeyboard, type MiddlewareFn } from "grammy";
 import type { Logger } from "pino";
 import type { ActionExecutor } from "../agent/action-executor.js";
-import { describeProposal } from "../agent/actions.js";
 import { BudgetExceededError } from "../agent/budget.js";
 import type { IncomingMessage, Orchestrator } from "../agent/orchestrator.js";
 import type { Reply } from "../agent/reply.js";
@@ -9,7 +8,9 @@ import type { PendingActionRow } from "../db/pending-actions.js";
 import { GoogleCalendarError } from "../integrations/google/calendar.js";
 import { GoogleAuthError } from "../integrations/google/oauth.js";
 import { TokenRefreshError } from "../integrations/token-refresh.js";
-import { budgetRefusalText, failureText, splitMessage } from "./formatting.js";
+import { actionResultText, budgetRefusalText, failureText, modelText } from "./formatting.js";
+import { esc, splitMessage } from "./html.js";
+import { proposalHtml } from "./proposal-html.js";
 
 // Telegram clears the "typing…" indicator after ~5 s; refresh it while Claude works.
 const TYPING_REFRESH_MS = 4_500;
@@ -40,15 +41,16 @@ export function proposalKeyboard(id: number): InlineKeyboard {
 
 // The proposal as rendered from its payload, with its buttons on the last chunk.
 export function proposalMessages(row: PendingActionRow) {
-  const chunks = splitMessage(describeProposal(row));
+  const chunks = splitMessage(proposalHtml(row));
   return chunks.map((text, index) => ({
     text,
     ...(index === chunks.length - 1 ? { reply_markup: proposalKeyboard(row.id) } : {}),
   }));
 }
 
+// The reply text is the model's Markdown (or plain text); proposals are rendered by code.
 export async function replyWithProposals(ctx: Context, reply: Reply): Promise<void> {
-  for (const chunk of splitMessage(reply.text)) await ctx.reply(chunk);
+  for (const chunk of splitMessage(modelText(reply.text))) await ctx.reply(chunk);
   for (const proposal of reply.proposals) {
     for (const { text, ...options } of proposalMessages(proposal)) await ctx.reply(text, options);
   }
@@ -79,7 +81,8 @@ export function registerMessageHandlers(bot: Bot, { orchestrator, executor }: Ha
       reply = await withTyping(ctx, () => orchestrator.handleMessage(incoming));
     } catch (error) {
       if (!(error instanceof BudgetExceededError)) throw error;
-      reply = { text: budgetRefusalText(), proposals: [] };
+      await ctx.reply(budgetRefusalText());
+      return;
     }
     await replyWithProposals(ctx, reply);
   }
@@ -122,19 +125,19 @@ export function registerMessageHandlers(bot: Bot, { orchestrator, executor }: Ha
       // The row was restored: keep the buttons so Confirm can be tapped again.
       if (error instanceof GoogleAuthError) {
         await ctx.reply(
-          "Google Calendar access has expired or was revoked. Send /reauth calendar, then tap Confirm again.",
+          "⚠️ Google Calendar access has expired or was revoked. Send /reauth calendar, then tap Confirm again.",
         );
         return;
       }
       if (error instanceof TokenRefreshError) {
         await ctx.reply(
-          "Google didn't answer when renewing calendar access. Nothing was lost; tap Confirm to retry in a bit.",
+          "⚠️ Google didn't answer when renewing calendar access. Nothing was lost; tap Confirm to retry in a bit.",
         );
         return;
       }
       if (error instanceof GoogleCalendarError) {
         await ctx.reply(
-          `Booking failed (${error.message}). Nothing was lost; tap Confirm to retry.`,
+          `⚠️ Booking failed (${esc(error.message)}). Nothing was lost; tap Confirm to retry.`,
         );
         return;
       }
@@ -143,7 +146,7 @@ export function registerMessageHandlers(bot: Bot, { orchestrator, executor }: Ha
     await ctx.editMessageReplyMarkup().catch(() => {
       // The message may be too old to edit; the row is consumed either way.
     });
-    await ctx.reply(result);
+    await ctx.reply(actionResultText(result));
   });
 
   bot.on("message", async (ctx) => {

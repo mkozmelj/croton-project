@@ -438,3 +438,73 @@ Removing DRM is prohibited in the EU even for owned copies (InfoSoc Directive Ar
 - Proposals go through `pending_actions` like every other marker, with the new source `activity` ("from a hard workout"). `source` is a plain `text` column, so this needed no migration.
 
 **`/profile` editing (Phase 5):** `/profile ftp 250`, `lthr run 168`, `maxhr 190`, `pace 4:15`, `css 1:45`, `vdot 48.5` or `vdot 10k 45:30` (computed in code), `availability …`, `injuries …`, `name …`, with an optional trailing date. Each edit becomes the same `add_fitness_marker` or `update_profile` proposal the chat tools create, with range checks against typos. Zones still can't be edited: they follow the markers.
+
+---
+
+## ADR-017: Telegram messages are HTML
+
+**Problem:** every message went out as plain text, and the system prompt told the model not to use Markdown. The longer messages (`/profile`, the weekly plan, recaps) were hard to read as one wall of text.
+
+**Decision:**
+- **Every `sendMessage` and `editMessageText` uses `parse_mode: "HTML"`.** A grammy API transformer (`src/bot/parse-mode.ts`, installed in `configureBot`) sets it, so replies and notifier messages get it without each call site passing it. If Telegram still rejects the markup ("can't parse entities"), the transformer sends the same message again as plain text with the tags stripped. A formatting bug costs the formatting, never the message.
+- **HTML, not MarkdownV2.** MarkdownV2 rejects the whole message when any of 18 characters is unescaped, and training text is full of them (`4:15 /km`, `(80% easy)`, `3x8 min.`). HTML only reserves `<`, `>` and `&`.
+- **Text built in code** uses the helpers in `src/bot/html.ts` (`esc`, `bold`, `quote`, `section`, sport and intensity emoji). All data (DB values, athlete input, model-written plan titles and notes) goes through `esc()`. Long detail that's rarely read (zones, workout structure in the week view) goes in expandable quotes.
+- **Text written by the model** (chat replies, the recap, the activity comment) is light Markdown, as the prompt now allows. `src/bot/markdown.ts` converts it to HTML when it's sent. Stored conversations keep the Markdown, so replayed history is what the model wrote. Asking the model for HTML directly was rejected: an unescaped "HR <150" would break the message.
+- **The plain renderings stay** for the model: `describeProposal`, `planLines`/`planText`, `describeActivity` and friends feed the prompt context and stored turns. The Telegram versions live in `src/bot/` (`formatting.ts`, `plan-html.ts`, `proposal-html.ts`).
+- **Activity notifications** show the numbers in a header rendered by code. The model writes only the comment underneath. Over budget, the header is sent alone.
+- `splitMessage` works on the HTML. A tag still open at a cut is closed at the end of that chunk and reopened at the start of the next, and a cut never lands inside a tag or an entity.
+
+---
+
+## ADR-018: Post-activity feedback lives in its own table
+
+**Problem:** The activity summary tells the athlete what the data says, but the agent never learns how a session felt. Session RPE, how the legs felt, pain or niggles and why a workout went off plan are the inputs a coach uses most, and none of them come from Strava or Intervals.icu. The answers have to be stored with the activity and used in planning, and asking must not become a chore the athlete learns to ignore.
+
+**Decision:**
+- **A separate table, not columns on `activities`.** `activities` is upserted by every Strava `update` event and every re-import (ADR-009), so feedback there would be one careless `set` clause away from being overwritten. One row per activity:
+  ```
+  activity_feedback
+  ├── id: serial PK
+  ├── activity_id: integer UNIQUE → activities.id ON DELETE CASCADE
+  ├── rpe: integer null          # 1–10 session RPE
+  ├── feel: text null            # 'awful' | 'meh' | 'good' | 'strong'
+  ├── pain: boolean null         # null = not asked / not answered
+  ├── pain_note: text null
+  ├── note: text null
+  ├── rpe_source: text null      # 'athlete' | 'strava' (RPE read from the activity)
+  ├── created_at, updated_at
+  ```
+  Every write is an upsert on `activity_id`, so a double tap or a changed answer just updates the row.
+- **Buttons first, typing optional.** The questions go in their own message after the summary, as inline buttons: RPE (1–10, two rows), feel (4 buttons), pain (No / Yes), and an "Add a note" button. `callback_data` is `fb:<activityId>:<field>:<value>`, well under Telegram's 64 bytes, so each answer names its activity and two activities in a row can't get mixed up. A tap writes directly: no Claude call, no `pending_actions` row. The message is edited to show the answers so far.
+- **Free text only when the athlete asks for it.** "Pain: Yes" and "Add a note" start a new `activity_feedback` conversation mode in `pending_actions` (payload `{ activityId, field: 'painNote' | 'note' }`, 1 h expiry, ADR-007). The next message is stored as-is and acknowledged, then the mode ends. The bot never takes over the next message on its own, so an ordinary chat message after a summary isn't swallowed as feedback. Notes are stored as raw text, with no extraction call: the model reads them in context.
+- **Not every activity gets the full set.** The full set is sent when the activity matches a planned non-easy workout in `training_plans`, lasts 90 minutes or more, or is a detected field test or breakthrough. Anything else gets only the RPE rows and the note button. Imports (`/import`, `tp:import`) and activities older than 24 hours at arrival get no questions at all. These rules are a first guess; revisit them after a few weeks of use.
+- **Don't ask for what's already known.** If the Strava activity already has a perceived exertion (the `perceived_exertion` field in `raw_data`, when present), it's stored with `rpe_source = 'strava'` and the RPE rows are left out.
+- **Feedback is used, not just collected.**
+  - Dynamic context (after the cache breakpoint, ADR-004): one short line per activity with feedback in the chat window, e.g. `Tue run 62 min: RPE 7, meh, note "legs heavy from Monday"`.
+  - Pain is flagged: any pain note in the last 14 days appears in its own context line, and two or more reports in 14 days add a line telling the planner to reduce load on that area and ask about it.
+  - Session RPE load (RPE × minutes) per week sits next to training load in plan generation and the Sunday recap. When RPE rises at similar HR or pace, that's a fatigue signal the planner should name.
+
+**Why not a Claude-driven conversation?** A model asking follow-up questions reads nicer but costs a Sonnet call per activity, is harder to keep short, and gives answers that have to be parsed back into fields. Buttons give clean numbers for free, and the free-text note still catches everything the buttons can't.
+
+**Implementation notes (Phase 6):**
+- Code: `src/db/activity-feedback.ts` (store), `src/agent/feedback-questions.ts` (question rules, Strava RPE), `src/agent/feedback-format.ts` (context lines, session-RPE load), `src/bot/feedback.ts` (message, buttons, tap handler). Migration `0006`.
+- **Note mode expires after 1 hour, not 24.** The mode takes over the next message, and a chat message sent the next day shouldn't become a note because a button was tapped and forgotten. A newer tap replaces an open note; "No pain" after "Some pain" closes the pain note. The note mode comes before an open recap, since it was started more recently.
+- **Redrawing after a tap:** the questions asked are read back from the tapped message's own buttons, so nothing about the question set is stored. Selected answers get a ✓, and tapping another answer changes it (the row is upserted field by field).
+- **A tap on a deleted activity** gets "That activity is gone" and the buttons are removed. The store checks that the activity exists before the upsert, so the foreign key never throws.
+- **Strava RPE is only read when the activity is first synced.** An RPE added in the Strava app later (an `update` event) isn't picked up; the bot's own question covers that case. `perceived_exertion` isn't in Strava's published API reference, so it's parsed defensively and still has to be confirmed against a real activity.
+- Session RPE load appears per week in chat context (this and last week) and per baseline week in plan generation. The recap prompt mentions session feedback under recovery.
+
+---
+
+## ADR-019: A matched Strava activity takes the planned session's title and description
+
+**Problem:** A Strava activity says "Morning Run" even when it was the planned tempo session, and nothing on Strava shows what the session was meant to be.
+
+**Decision:**
+- **One matcher** (`src/training/plan-match.ts`) decides which planned workout an activity fulfilled, for both the feedback questions (ADR-018) and Strava: same local day, a fitting sport (a run can fulfil a trail run or a brick), a duration between 40% and 250% of the plan (bricks exempt), and not already taken by another activity. Among several, the exact sport wins, then the closer start time.
+- **The match is recorded on the workout** as `strava_activity_id` in `training_plans.plan`, next to `calendar_event_id`. A second run that day can't take the same session. A plan change from today on replaces today's workouts and drops their links; days before today keep theirs.
+- **Only on `create`**, after all the Telegram messages. `PUT /activities/{id}` sets `name` to the planned title and appends a plain-text block to the description (`src/integrations/strava/plan-description.ts`): planned title, duration and intensity, the structure, targets, field test, minutes done vs planned, session number in the week and the phase. The athlete's or device's own text stays first. A rerun replaces the block, which starts with `📋 Planned:` and runs to the end.
+- **Plan and compliance only, never wellness data or the coach's comment.** Strava descriptions are usually public, and the workout `notes` and the Telegram comment can mention HRV, sleep or weight.
+- **`activity:write` is requested but optional.** Connections from before this change don't have it until `/reauth strava`. Without it the match is still recorded and Strava is left alone. The granted scope is read from `oauth_tokens.scope`.
+- Our own edit makes Strava send an `update` event. The sync re-fetches and upserts the activity (its `notes` now include the block). No notification is sent, because only `create` notifies.
+- A failed update (`StravaApiError`, `StravaAuthError`) goes through the background-task runner like any other Strava failure: a log line and the usual Telegram alert.

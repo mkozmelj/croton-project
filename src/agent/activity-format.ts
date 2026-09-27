@@ -96,6 +96,12 @@ const hoursMinutes = (minutes: number) =>
 
 // e.g. `sleep 7h12 (deep 1h20, REM 1h35, score 82), HRV 62 ms, resting HR 48, ...`.
 export function describeHealth(row: HealthMetrics): string {
+  const parts = healthParts(row);
+  return parts.length > 0 ? parts.join(", ") : "no values";
+}
+
+// The values describeHealth joins, one per metric (Telegram lists them line by line).
+export function healthParts(row: HealthMetrics): string[] {
   const parts: string[] = [];
   if (row.sleepDurationMinutes != null) {
     const stages = [
@@ -112,5 +118,5 @@ export function describeHealth(row: HealthMetrics): string {
   if (row.stressAvg != null) parts.push(`stress ${row.stressAvg}`);
   if (row.weightKg != null) parts.push(`weight ${row.weightKg.toFixed(1)} kg`);
   if (row.bodyFatPct != null) parts.push(`body fat ${row.bodyFatPct.toFixed(1)}%`);
-  return parts.length > 0 ? parts.join(", ") : "no values";
+  return parts;
 }

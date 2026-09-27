@@ -6,10 +6,11 @@ import type {
 } from "@anthropic-ai/sdk/resources/messages/messages";
 import type { Logger } from "pino";
 import { MODELS } from "../config/env.js";
+import type { ActivityFeedbackStore } from "../db/activity-feedback.js";
 import type { ConversationStore, ConversationTurn } from "../db/conversations.js";
 import type { PendingActionRow, PendingActionStore } from "../db/pending-actions.js";
 import { localDate } from "../utils/dates.js";
-import { ONBOARDING_TTL_MS, recapPayload } from "./actions.js";
+import { activityFeedbackPayload, ONBOARDING_TTL_MS, recapPayload } from "./actions.js";
 import { type RoutedCallType, routeMessage } from "./classifier.js";
 import { CALL_POLICIES, type Claude } from "./claude.js";
 import type { ContextBuilder } from "./context.js";
@@ -33,6 +34,7 @@ type OrchestratorDeps = {
   tools: ToolHandlers;
   pending: Pick<PendingActionStore, "live" | "consume" | "create" | "clear">;
   planner: Pick<Planner, "generate">;
+  feedback: Pick<ActivityFeedbackStore, "set">;
   chatId: number;
   timeZone: string;
   logger?: Logger;
@@ -55,7 +57,8 @@ export type Orchestrator = {
 const isHaiku = (callType: RoutedCallType) => CALL_POLICIES[callType].model === MODELS.haiku;
 
 // Every free-text message is routed (classifier.ts) to a Sonnet or Haiku call type. An open
-// recap turns the message into plan generation instead.
+// activity-feedback note stores the message instead (ADR-018), and an open recap turns it
+// into plan generation.
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const now = deps.now ?? (() => new Date());
 
@@ -137,9 +140,30 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return { text: last ? replyText(last, texts.join("\n\n")) : "", proposals };
   }
 
+  // Stored as written: the model reads it in the context, so there's no call here.
+  async function storeNote(payload: unknown, text: string): Promise<Reply> {
+    const { activityId, field } = activityFeedbackPayload.parse(payload);
+    const stored = await deps.feedback.set(activityId, { [field]: text.trim() });
+    const reply = !stored
+      ? "That activity is gone (deleted on Strava?), so the note wasn't saved."
+      : field === "painNote"
+        ? "Noted. I'll keep it in mind when planning, and ask how it is before any hard sessions."
+        : "Noted, thanks.";
+    return { text: reply, proposals: [] };
+  }
+
   return {
     async handleMessage(incoming) {
-      const modes = await deps.pending.live(deps.chatId, ["recap", "onboarding"]);
+      const modes = await deps.pending.live(deps.chatId, [
+        "activity_feedback",
+        "recap",
+        "onboarding",
+      ]);
+      // Started by a tap on "Add a note" or "Pain: yes", so it's the athlete's latest intent.
+      const note = modes.findLast((row) => row.actionType === "activity_feedback");
+      if (note && (await deps.pending.consume(note.id, deps.chatId))) {
+        return storeNote(note.payload, incoming.text);
+      }
       const recap = modes.find((row) => row.actionType === "recap");
       if (recap && (await deps.pending.consume(recap.id, deps.chatId))) {
         const { weekStart } = recapPayload.parse(recap.payload);

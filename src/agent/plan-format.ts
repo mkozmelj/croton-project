@@ -4,7 +4,7 @@ import { sortedWorkouts } from "../training/plan.js";
 // Plain-text renderings of plans, shared by the prompt context and Telegram (like
 // activity-format.ts). Plan text written by the model is data: it's rendered, not obeyed.
 
-const dayLabel = (isoDate: string) =>
+export const dayLabel = (isoDate: string) =>
   new Intl.DateTimeFormat("en-GB", {
     timeZone: "UTC",
     weekday: "short",

@@ -91,6 +91,7 @@ export function createActionExecutor(deps: ExecutorDeps): ActionExecutor {
 
       case "recap":
       case "onboarding":
+      case "activity_feedback":
         return "Nothing to confirm.";
     }
   }

@@ -2,6 +2,7 @@ import type { ContentBlockParam } from "@anthropic-ai/sdk/resources/messages/mes
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   check,
   date,
   index,
@@ -136,6 +137,32 @@ export const activities = pgTable(
   (table) => [index("activities_started_at_idx").on(table.startedAt)],
 );
 
+export const ACTIVITY_FEELS = ["awful", "meh", "good", "strong"] as const;
+export const RPE_SOURCES = ["athlete", "strava"] as const;
+
+// ADR-018: the athlete's answers about one activity. A table of its own so the activity
+// upserts (ADR-009) can never overwrite them; upserted on `activity_id`, one field at a time.
+export const activityFeedback = pgTable(
+  "activity_feedback",
+  {
+    id: serial("id").primaryKey(),
+    activityId: integer("activity_id")
+      .notNull()
+      .unique()
+      .references(() => activities.id, { onDelete: "cascade" }),
+    rpe: integer("rpe"),
+    rpeSource: text("rpe_source", { enum: RPE_SOURCES }),
+    feel: text("feel", { enum: ACTIVITY_FEELS }),
+    // null: not answered.
+    pain: boolean("pain"),
+    painNote: text("pain_note"),
+    note: text("note"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [check("activity_feedback_rpe_range", sql`${table.rpe} between 1 and 10`)],
+);
+
 // ADR-009: one row per local date, upserted on `date`. An upsert only sets the columns it
 // has values for; `raw_data` keeps the latest record per source (ADR-015: { intervals }).
 export const healthMetrics = pgTable("health_metrics", {
@@ -265,11 +292,12 @@ export const PENDING_ACTION_TYPES = [
   // Conversation modes.
   "recap",
   "onboarding",
+  "activity_feedback",
 ] as const;
 
 // ADR-007: state that must survive a restart. Two kinds share the table: confirmations
 // (answered with a button, `payload` is what gets written) and conversation modes
-// (`recap`, `onboarding`: they change how the next message is handled).
+// (`recap`, `onboarding`, `activity_feedback`: they change how the next message is handled).
 export const pendingActions = pgTable(
   "pending_actions",
   {

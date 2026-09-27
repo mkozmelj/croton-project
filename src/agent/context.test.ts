@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Activity } from "../db/activities.js";
+import type { ActivityFeedback } from "../db/activity-feedback.js";
 import type { ConversationMemory } from "../db/conversation-memories.js";
 import type { StoredMarker } from "../db/fitness-markers.js";
 import type { GoalWithEvent } from "../db/goals.js";
@@ -83,6 +84,7 @@ type Extras = {
   markers?: StoredMarker[];
   goals?: GoalWithEvent[];
   memories?: ConversationMemory[];
+  feedback?: ActivityFeedback[];
 };
 
 function builder(activities: Activity[], rows: HealthMetrics[] = [], extras: Extras = {}) {
@@ -101,6 +103,14 @@ function builder(activities: Activity[], rows: HealthMetrics[] = [], extras: Ext
     plans: { forWeek: async () => null },
     pending: { live: async () => [] },
     memories: { recent: async () => extras.memories ?? [] },
+    feedback: {
+      forActivities: async (ids) =>
+        new Map(
+          (extras.feedback ?? [])
+            .filter((f) => ids.includes(f.activityId))
+            .map((f) => [f.activityId, f]),
+        ),
+    },
     chatId: 1,
     timeZone: "Europe/Ljubljana",
     now: () => NOW,
@@ -108,7 +118,70 @@ function builder(activities: Activity[], rows: HealthMetrics[] = [], extras: Ext
   return { context, ranges };
 }
 
+function feedback(overrides: Partial<ActivityFeedback>): ActivityFeedback {
+  return {
+    id: 1,
+    activityId: 1,
+    rpe: null,
+    rpeSource: null,
+    feel: null,
+    pain: null,
+    painNote: null,
+    note: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...overrides,
+  };
+}
+
 describe("createContextBuilder().build", () => {
+  it("adds the athlete's feedback to activities and session RPE load to the weeks", async () => {
+    const { context } = builder(
+      [
+        storedActivity({ id: 1, startedAt: new Date("2026-09-22T05:00:00Z") }), // 2556 s
+        storedActivity({ id: 2, startedAt: new Date("2026-09-23T05:00:00Z"), name: "Easy" }),
+      ],
+      [],
+      {
+        feedback: [
+          feedback({ activityId: 1, rpe: 7, feel: "meh", pain: false, note: "legs heavy" }),
+        ],
+      },
+    );
+    const text = await context.build();
+    expect(text).toContain(
+      'relative effort 60 | athlete: RPE 7, felt meh, no pain, note: "legs heavy"',
+    );
+    expect(text).toMatch(/"Easy": [^\n]*relative effort 60\n/);
+    const thisWeek = text.slice(text.indexOf("THIS WEEK"), text.indexOf("LAST WEEK"));
+    expect(thisWeek).toContain("- session RPE load 298 (RPE × min, 1 of 2 activities rated)");
+    expect(text).not.toContain("PAIN REPORTED");
+  });
+
+  it("lists pain reports from the last 14 days and asks for less load from two on", async () => {
+    const activities = [
+      storedActivity({ id: 1, startedAt: new Date("2026-09-08T05:00:00Z") }), // 16 days ago
+      storedActivity({ id: 2, startedAt: new Date("2026-09-15T05:00:00Z") }),
+      storedActivity({ id: 3, startedAt: new Date("2026-09-22T05:00:00Z") }),
+    ];
+    const pains = [
+      feedback({ activityId: 1, pain: true, painNote: "old knee thing" }),
+      feedback({ activityId: 2, pain: true, painNote: "left calf" }),
+    ];
+    const one = await builder(activities, [], { feedback: pains }).context.build();
+    expect(one).toContain(
+      "PAIN REPORTED AFTER SESSIONS, LAST 14 DAYS\n- Tue 15 Sept, 07:00, run: left calf",
+    );
+    expect(one).not.toContain("old knee thing");
+    expect(one).not.toContain("reduce load");
+
+    const two = await builder(activities, [], {
+      feedback: [...pains, feedback({ activityId: 3, pain: true, painNote: null })],
+    }).context.build();
+    expect(two).toContain("run: no details given");
+    expect(two).toContain("- 2 reports: reduce load on the affected area");
+  });
+
   it("adds the memory of older conversations only when there is one", async () => {
     expect(await builder([]).context.build()).not.toContain("MEMORY OF OLDER");
     const { context } = builder([], [], {

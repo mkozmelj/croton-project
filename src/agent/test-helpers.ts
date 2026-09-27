@@ -1,3 +1,4 @@
+import type { ActivityFeedback, ActivityFeedbackStore } from "../db/activity-feedback.js";
 import type { ConversationTurn, NewConversationTurn } from "../db/conversations.js";
 import type { PendingActionRow, PendingActionStore } from "../db/pending-actions.js";
 
@@ -57,4 +58,37 @@ export function inMemoryPending(now = () => new Date()) {
     },
   };
   return { store, rows: () => rows };
+}
+
+// Mirrors the DB store: a write for an activity that doesn't exist returns null.
+export function inMemoryFeedback(activityIds: readonly number[] = [1], now = () => new Date()) {
+  const rows = new Map<number, ActivityFeedback>();
+  const store: ActivityFeedbackStore = {
+    async set(activityId, fields) {
+      if (!activityIds.includes(activityId)) return null;
+      const row: ActivityFeedback = {
+        id: activityId,
+        activityId,
+        rpe: null,
+        rpeSource: null,
+        feel: null,
+        pain: null,
+        painNote: null,
+        note: null,
+        createdAt: now(),
+        ...rows.get(activityId),
+        ...fields,
+        updatedAt: now(),
+      };
+      rows.set(activityId, row);
+      return row;
+    },
+    async get(activityId) {
+      return rows.get(activityId) ?? null;
+    },
+    async forActivities(ids) {
+      return new Map([...rows].filter(([id]) => ids.includes(id)));
+    },
+  };
+  return { store, rows };
 }

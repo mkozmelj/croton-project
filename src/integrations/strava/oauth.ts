@@ -7,7 +7,9 @@ const AUTHORIZE_URL = "https://www.strava.com/oauth/authorize";
 const TOKEN_URL = "https://www.strava.com/oauth/token";
 
 // `activity:read_all` includes private activities; `read` is required by Strava for every app.
-export const STRAVA_SCOPES = "read,activity:read_all";
+// `activity:write` lets a matched activity take the planned session's title and description;
+// it's optional (the athlete can untick it), so everything else works without it.
+export const STRAVA_SCOPES = "read,activity:read_all,activity:write";
 
 // Refresh a little before the 6-hour expiry so a token never dies mid-request.
 const REFRESH_MARGIN_MS = 5 * 60 * 1000;
@@ -47,6 +49,8 @@ export type StravaAuth = {
   accessToken(): Promise<string>;
   // The connected athlete's Strava id, for the webhook owner check (ADR-012).
   athleteId(): Promise<string | null>;
+  // Whether the athlete granted `activity:write` (renaming a matched activity needs it).
+  canWriteActivities(): Promise<boolean>;
 };
 
 export function createStravaAuth(deps: StravaAuthDeps): StravaAuth {
@@ -143,6 +147,10 @@ export function createStravaAuth(deps: StravaAuthDeps): StravaAuth {
     async athleteId() {
       return (await deps.tokens.get("strava"))?.accountId ?? null;
     },
+
+    async canWriteActivities() {
+      return hasWriteScope((await deps.tokens.get("strava"))?.scope ?? "");
+    },
   };
 }
 
@@ -150,4 +158,9 @@ export function createStravaAuth(deps: StravaAuthDeps): StravaAuth {
 export function hasActivityScope(grantedScope: string): boolean {
   const scopes = grantedScope.split(",");
   return scopes.includes("activity:read") || scopes.includes("activity:read_all");
+}
+
+// Connections made before `activity:write` was requested don't have it until a /reauth.
+export function hasWriteScope(grantedScope: string): boolean {
+  return grantedScope.split(",").includes("activity:write");
 }

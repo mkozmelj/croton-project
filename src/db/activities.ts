@@ -18,6 +18,7 @@ export type ActivityStore = {
   deleteByExternalId(externalId: string): Promise<void>;
   // Activities with `from <= started_at < to`, oldest first.
   between(from: Date, to: Date): Promise<ActivitySummary[]>;
+  byId(id: number): Promise<ActivitySummary | null>;
 };
 
 export function createActivityStore(db: Database): ActivityStore {
@@ -58,6 +59,12 @@ export function createActivityStore(db: Database): ActivityStore {
         .from(activities)
         .where(and(gte(activities.startedAt, from), lt(activities.startedAt, to)))
         .orderBy(asc(activities.startedAt));
+    },
+
+    async byId(id) {
+      const { rawData: _raw, ...columns } = getTableColumns(activities);
+      const [row] = await db.select(columns).from(activities).where(eq(activities.id, id));
+      return row ?? null;
     },
   };
 }

@@ -104,7 +104,7 @@ describe("planTargetWeek", () => {
 describe("createPlanner", () => {
   it("opens a recap for next week", async () => {
     const { planner, pending } = setup(message("{}"));
-    expect(await planner.startRecap()).toContain("week of Mon 2026-09-28");
+    expect(await planner.startRecap()).toEqual({ weekStart: "2026-09-28" });
     expect(pending.rows()).toMatchObject([
       { actionType: "recap", payload: { weekStart: "2026-09-28" } },
     ]);

@@ -47,6 +47,9 @@ export type StravaActivity = z.infer<typeof stravaActivitySchema>;
 
 export type FetchedActivity = { activity: StravaActivity; raw: unknown };
 
+// The fields of Strava's UpdatableActivity this app writes.
+export type ActivityUpdate = { name?: string; description?: string };
+
 export type StravaClient = {
   // Null when the activity no longer exists or isn't visible with the granted scope.
   getActivity(id: number): Promise<FetchedActivity | null>;
@@ -58,6 +61,8 @@ export type StravaClient = {
     page: number,
     perPage: number,
   ): Promise<{ items: FetchedActivity[]; pageLength: number }>;
+  // Needs the `activity:write` scope. False when the activity no longer exists.
+  updateActivity(id: number, update: ActivityUpdate): Promise<boolean>;
 };
 
 export function createStravaClient({
@@ -67,9 +72,10 @@ export function createStravaClient({
   auth: Pick<StravaAuth, "accessToken">;
   fetch?: typeof fetch;
 }): StravaClient {
-  async function get(path: string): Promise<Response> {
+  async function request(path: string, init: RequestInit = {}): Promise<Response> {
     const response = await doFetch(`${API_BASE}${path}`, {
-      headers: { authorization: `Bearer ${await auth.accessToken()}` },
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${await auth.accessToken()}` },
       signal: timeoutSignal(),
     });
     if (response.status === 401) throw new StravaAuthError("Strava rejected the access token");
@@ -79,7 +85,7 @@ export function createStravaClient({
   return {
     async getActivity(id) {
       const path = `/activities/${id}`;
-      const response = await get(path);
+      const response = await request(path);
       if (response.status === 404) return null;
       if (!response.ok) throw new StravaApiError(response.status, path);
       const raw: unknown = await response.json();
@@ -93,7 +99,7 @@ export function createStravaClient({
         per_page: String(perPage),
       });
       const path = `/athlete/activities?${query}`;
-      const response = await get(path);
+      const response = await request(path);
       if (!response.ok) throw new StravaApiError(response.status, "/athlete/activities");
       const items = z.array(z.unknown()).parse(await response.json());
       // An entry that doesn't parse (an odd manual activity) is skipped, not fatal.
@@ -102,6 +108,18 @@ export function createStravaClient({
         return result.success ? [{ activity: result.data, raw }] : [];
       });
       return { items: parsed, pageLength: items.length };
+    },
+
+    async updateActivity(id, update) {
+      const path = `/activities/${id}`;
+      const response = await request(path, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(update),
+      });
+      if (response.status === 404) return false;
+      if (!response.ok) throw new StravaApiError(response.status, path);
+      return true;
     },
   };
 }

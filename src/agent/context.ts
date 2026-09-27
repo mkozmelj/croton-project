@@ -1,4 +1,5 @@
 import type { ActivityStore, ActivitySummary } from "../db/activities.js";
+import type { ActivityFeedback, ActivityFeedbackStore } from "../db/activity-feedback.js";
 import type { AthleteProfile, AthleteProfileStore } from "../db/athlete-profile.js";
 import type { ConversationMemory, ConversationMemoryStore } from "../db/conversation-memories.js";
 import type { StoredMarker } from "../db/fitness-markers.js";
@@ -35,6 +36,7 @@ import {
   formatDayTime,
   totalsBySport,
 } from "./activity-format.js";
+import { describeFeedback, describeRpeLoad, sessionRpeLoad } from "./feedback-format.js";
 import type { FitnessService } from "./fitness.js";
 import { historyStart, monthlyLines, peakLines } from "./history-summary.js";
 import { planLines } from "./plan-format.js";
@@ -50,6 +52,9 @@ const BASELINE_WEEKS = 6;
 const BODY_WEEKS = 8;
 // Monthly conversation summaries shown (spec.md §6.2): about half a year.
 const MEMORY_NOTES = 6;
+// ADR-018: pain reports in this window are listed; this many or more ask for less load.
+const PAIN_DAYS = 14;
+const PAIN_REPORTS_TO_ACT = 2;
 
 type ContextDeps = {
   profile: Pick<AthleteProfileStore, "get">;
@@ -60,6 +65,7 @@ type ContextDeps = {
   plans: Pick<TrainingPlanStore, "forWeek">;
   pending: Pick<PendingActionStore, "live">;
   memories: Pick<ConversationMemoryStore, "recent">;
+  feedback: Pick<ActivityFeedbackStore, "forActivities">;
   chatId: number;
   timeZone: string;
   now?: () => Date;
@@ -121,6 +127,12 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
       };
       const recent = activities.filter((a) => dayOf(a.startedAt) >= listFrom);
       const baselineActivities = activities.filter((a) => dayOf(a.startedAt) >= baselineFrom);
+      // Feedback only matters for the weeks shown one by one.
+      const feedback = await deps.feedback.forActivities(baselineActivities.map((a) => a.id));
+      const rpeLoadLine = (start: string) => {
+        const line = describeRpeLoad(sessionRpeLoad(inWeek(start), feedback));
+        return line ? [`- ${line}`] : [];
+      };
       const bodyReadings = health.map((h) => ({
         date: h.date,
         weightKg: h.weightKg,
@@ -164,13 +176,15 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
         "",
         `THIS WEEK (Mon ${thisWeek} to today), by sport`,
         ...weekLines(thisWeek),
+        ...rpeLoadLine(thisWeek),
         "",
         `LAST WEEK (Mon ${lastWeek}), by sport`,
         ...weekLines(lastWeek),
+        ...rpeLoadLine(lastWeek),
         ...(options.detail === "baseline"
           ? [
               "",
-              ...baselineLines(baselineFrom, inWeek),
+              ...baselineLines(baselineFrom, inWeek, feedback),
               "",
               ...loadTrendLines(health, baselineFrom),
               "",
@@ -193,12 +207,18 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
         `BODY COMPOSITION, weekly averages over ${BODY_WEEKS} weeks (judge the trend, not single days)`,
         ...bodyLines(bodyReadings, bodyFrom),
         "",
-        `ACTIVITIES, LAST ${ACTIVITY_DAYS} DAYS (from Strava)`,
+        `ACTIVITIES, LAST ${ACTIVITY_DAYS} DAYS (from Strava; "athlete:" is the athlete's own post-session feedback)`,
         ...orNone(
-          recent.map(
-            (a) => `- ${formatDayTime(a.startedAt, deps.timeZone)}: ${describeActivity(a)}`,
-          ),
+          recent.map((a) => {
+            const said = feedbackSuffix(feedback.get(a.id));
+            return `- ${formatDayTime(a.startedAt, deps.timeZone)}: ${describeActivity(a)}${said}`;
+          }),
           "- none",
+        ),
+        ...painLines(
+          baselineActivities.filter((a) => dayOf(a.startedAt) > addDays(today, -PAIN_DAYS)),
+          feedback,
+          (a) => formatDayTime(a.startedAt, deps.timeZone),
         ),
         "",
         `HEALTH, LAST ${HEALTH_DAYS} DAYS (Garmin via Intervals.icu, newest first)`,
@@ -217,6 +237,34 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
 }
 
 const orNone = (lines: string[], none: string) => (lines.length > 0 ? lines : [none]);
+
+function feedbackSuffix(feedback: ActivityFeedback | undefined): string {
+  const said = feedback ? describeFeedback(feedback) : "";
+  return said ? ` | athlete: ${said}` : "";
+}
+
+// ADR-018: pain is never left to be spotted in the activity list.
+function painLines(
+  activities: readonly ActivitySummary[],
+  feedback: ReadonlyMap<number, ActivityFeedback>,
+  when: (activity: ActivitySummary) => string,
+): string[] {
+  const reports = activities.flatMap((a) => {
+    const f = feedback.get(a.id);
+    return f?.pain ? [`- ${when(a)}, ${a.sport}: ${f.painNote ?? "no details given"}`] : [];
+  });
+  if (reports.length === 0) return [];
+  return [
+    "",
+    `PAIN REPORTED AFTER SESSIONS, LAST ${PAIN_DAYS} DAYS`,
+    ...reports,
+    ...(reports.length >= PAIN_REPORTS_TO_ACT
+      ? [
+          `- ${reports.length} reports: reduce load on the affected area in any plan or change, and ask the athlete how it is before prescribing intensity.`,
+        ]
+      : []),
+  ];
+}
 
 // Older conversations, summarized monthly; the raw turns are gone.
 function memoryLines(memories: readonly ConversationMemory[]): string[] {
@@ -338,13 +386,15 @@ function planWeekPhaseLine(aGoal: GoalWithEvent | null, planWeek: string): strin
 function baselineLines(
   from: string,
   inWeek: (start: string) => readonly ActivitySummary[],
+  feedback: ReadonlyMap<number, ActivityFeedback>,
 ): string[] {
   const lines = [`LAST ${BASELINE_WEEKS} WEEKS, per-sport totals (oldest first)`];
   for (let i = 0; i < BASELINE_WEEKS; i++) {
     const start = addDays(from, 7 * i);
     const totals = totalsBySport(inWeek(start));
+    const rpeLoad = describeRpeLoad(sessionRpeLoad(inWeek(start), feedback));
     lines.push(
-      `- Mon ${start}: ${totals.length > 0 ? totals.map(describeTotals).join("; ") : "nothing logged"}`,
+      `- Mon ${start}: ${totals.length > 0 ? totals.map(describeTotals).join("; ") : "nothing logged"}${rpeLoad ? `; ${rpeLoad}` : ""}`,
     );
   }
   return lines;

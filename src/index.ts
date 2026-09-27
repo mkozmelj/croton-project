@@ -5,11 +5,13 @@ import { createActivitySummarizer } from "./agent/activity-summary.js";
 import { createCalendarContext } from "./agent/calendar-context.js";
 import { createClaude } from "./agent/claude.js";
 import { createContextBuilder } from "./agent/context.js";
+import { createFeedbackRequester } from "./agent/feedback-questions.js";
 import { createFitnessService } from "./agent/fitness.js";
 import { createMarkerProposer } from "./agent/marker-proposals.js";
 import { createConversationMemory } from "./agent/memory.js";
 import { createOrchestrator } from "./agent/orchestrator.js";
 import { createPlanBooking } from "./agent/plan-booking.js";
+import { createPlanLinker } from "./agent/plan-link.js";
 import { createPlanner } from "./agent/planner.js";
 import { createToolHandlers } from "./agent/tool-handlers.js";
 import {
@@ -18,12 +20,16 @@ import {
   IMPORT_WELLNESS_DAYS,
   type ImportSummary,
 } from "./bot/commands.js";
+import { feedbackKeyboard, feedbackText } from "./bot/feedback.js";
 import {
   activityFailureText,
+  activityText,
+  backgroundFailureText,
   budgetAlertText,
   googleConnectedText,
   jobFailureText,
   jobRecoveredText,
+  recapQuestionText,
   serverFailureText,
   stravaConnectedText,
   stravaRevokedText,
@@ -34,6 +40,7 @@ import { type BotTransport, configureBot, startBot } from "./bot/setup.js";
 import { registerTelegramWebhook } from "./bot/webhook.js";
 import { env } from "./config/env.js";
 import { createActivityStore } from "./db/activities.js";
+import { createActivityFeedbackStore } from "./db/activity-feedback.js";
 import { createAthleteProfileStore } from "./db/athlete-profile.js";
 import { createDatabase, runMigrations } from "./db/client.js";
 import { createConversationMemoryStore } from "./db/conversation-memories.js";
@@ -135,6 +142,7 @@ const claude = createClaude({
 
 const chatId = env.TELEGRAM_AUTHORIZED_CHAT_ID;
 const activities = createActivityStore(db);
+const activityFeedback = createActivityFeedbackStore(db);
 const health = createHealthMetricsStore(db);
 const profile = createAthleteProfileStore(db);
 const markers = createFitnessMarkerStore(db);
@@ -153,6 +161,7 @@ const context = createContextBuilder({
   plans,
   pending,
   memories,
+  feedback: activityFeedback,
   chatId,
   timeZone: env.TIMEZONE,
 });
@@ -171,9 +180,7 @@ const tasks = createBackgroundTasks({
     // A failed token refresh already alerted once for its failure streak.
     if (isReportedRefreshFailure(error)) return;
     await notifier.notify(
-      label.startsWith("strava")
-        ? activityFailureText()
-        : `Background task ${label} failed. It's logged.`,
+      label.startsWith("strava") ? activityFailureText() : backgroundFailureText(label),
     );
   },
 });
@@ -284,6 +291,11 @@ const planner = createPlanner({
   timeZone: env.TIMEZONE,
   logger,
 });
+const feedbackRequests = createFeedbackRequester({
+  plans,
+  feedback: activityFeedback,
+  timeZone: env.TIMEZONE,
+});
 const markerProposals = createMarkerProposer({
   plans,
   pending,
@@ -317,16 +329,36 @@ if (env.STRAVA_CLIENT_ID && env.STRAVA_CLIENT_SECRET && tokens) {
 
   if (env.STRAVA_WEBHOOK_VERIFY_TOKEN) {
     const summarizer = createActivitySummarizer({ claude, context, timeZone: env.TIMEZONE });
+    const planLinker = createPlanLinker({
+      plans,
+      strava: stravaClient,
+      canWrite: () => auth.canWriteActivities(),
+      timeZone: env.TIMEZONE,
+      logger,
+    });
     const sync = createStravaActivitySync({
       client: stravaClient,
       activities,
       tokens,
       onNewActivity: async (activity) => {
-        await notifier.notify(await summarizer.summarize(activity));
+        await notifier.notify(
+          activityText(activity, env.TIMEZONE, await summarizer.summarize(activity)),
+        );
         // ADR-016: a completed field test, or a workout that beat a threshold, proposes markers.
-        for (const proposal of await markerProposals.propose(activity)) {
-          await notifier.propose(proposal);
+        const proposals = await markerProposals.propose(activity);
+        for (const proposal of proposals) await notifier.propose(proposal);
+        // ADR-018: last, so a failure here can't hold back the summary or the proposals.
+        const questions = await feedbackRequests.prepare(activity, proposals.length > 0);
+        if (questions.length > 0) {
+          const known = await activityFeedback.get(activity.id);
+          await notifier.notifyWithButtons(
+            feedbackText(activity, questions, known, env.TIMEZONE),
+            feedbackKeyboard(activity.id, questions, known),
+          );
         }
+        // After everything the athlete sees: a Strava API failure here is alerted by the
+        // task runner and can't hold back the Telegram messages.
+        await planLinker.link(activity);
       },
       onDeauthorized: () => notifier.notify(stravaRevokedText()),
       logger,
@@ -357,7 +389,7 @@ jobs.push({
   name: "sunday-recap",
   cron: "0 19 * * 0",
   run: async () => {
-    await notifier.notify(await planner.startRecap());
+    await notifier.notify(recapQuestionText((await planner.startRecap()).weekStart));
   },
 });
 
@@ -409,6 +441,7 @@ const orchestrator = createOrchestrator({
   tools,
   pending,
   planner,
+  feedback: activityFeedback,
   chatId,
   timeZone: env.TIMEZONE,
   logger,
@@ -435,6 +468,12 @@ configureBot(bot, {
   pending,
   planner,
   onboarding: orchestrator,
+  activityFeedback: {
+    feedback: activityFeedback,
+    activities,
+    pending,
+    timeZone: env.TIMEZONE,
+  },
   importHistory,
   // /selftest: a background task that fails on purpose, to check the alert path end to end.
   runSelfTest: () =>
@@ -486,6 +525,6 @@ try {
   logger.info({ transport: transport.mode, thinkingDisabled: env.DISABLE_THINKING }, "started");
 } catch (error) {
   logger.fatal({ err: error }, "startup failed");
-  await withTimeout(notifier.notify("The app failed to start after a deploy. It's logged."));
+  await withTimeout(notifier.notify("⚠️ The app failed to start after a deploy. It's logged."));
   process.exit(1);
 }

@@ -12,8 +12,9 @@ type SummaryDeps = {
 };
 
 export type ActivitySummarizer = {
-  // The Telegram text for a newly synced activity.
-  summarize(activity: ActivitySummary): Promise<string>;
+  // The coach's comment on a newly synced activity (the bot shows the numbers above it), or
+  // null when the budget doesn't allow a model call.
+  summarize(activity: ActivitySummary): Promise<string | null>;
 };
 
 // spec.md §6.5: Haiku, no thinking (ADR-005 `activity_summary`). The context block already
@@ -36,8 +37,9 @@ export function createActivitySummarizer(deps: SummaryDeps): ActivitySummarizer 
                     "A new activity just synced from Strava:",
                     `<activity>${line}${lapLine(activity)}</activity>`,
                     "",
-                    "Write the Telegram notification about it: 2-4 short sentences.",
-                    "Start with the key numbers, then put it in the context of this week's",
+                    "Write the coach's comment for the Telegram notification: 2-4 short sentences.",
+                    "The activity's numbers are already shown above your text, so don't list them;",
+                    "mention only the ones that matter. Put the session in the context of this week's",
                     "training so far (and the confirmed plan, if there is one: was this the",
                     "planned session, how many of the week's sessions are done) and the",
                     "athlete's recent recovery data. Flag anything",
@@ -51,8 +53,8 @@ export function createActivitySummarizer(deps: SummaryDeps): ActivitySummarizer 
         });
         return replyText(message);
       } catch (error) {
-        // Over budget: still tell the athlete the activity arrived, without the LLM.
-        if (error instanceof BudgetExceededError) return `New activity synced: ${line}`;
+        // Over budget: the athlete still gets the numbers, without a comment.
+        if (error instanceof BudgetExceededError) return null;
         throw error;
       }
     },

@@ -43,6 +43,13 @@
       "when": 1790489455485,
       "tag": "0005_phase5_conversation_memories",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790490780177,
+      "tag": "0006_phase6_activity_feedback",
+      "breakpoints": true
     }
   ]
 }

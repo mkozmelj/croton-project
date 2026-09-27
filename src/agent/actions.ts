@@ -21,6 +21,9 @@ import { planText } from "./plan-format.js";
 export const CONFIRMATION_TTL_MS = 24 * 60 * 60 * 1000;
 export const RECAP_TTL_MS = 24 * 60 * 60 * 1000;
 export const ONBOARDING_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+// Short on purpose: the mode takes over the next message, which must not be a chat message
+// sent long after the athlete tapped "Add a note" and forgot about it.
+export const FEEDBACK_NOTE_TTL_MS = 60 * 60 * 1000;
 
 export const CONFIRMATION_TYPES = [
   "set_goal",
@@ -81,10 +84,17 @@ export const applyPlanPayload = z.object({
 
 export const recapPayload = z.object({ weekStart: z.iso.date() });
 
+// ADR-018: the next message is a note on this activity.
+export const activityFeedbackPayload = z.object({
+  activityId: z.number().int(),
+  field: z.enum(["painNote", "note"]),
+});
+
 export type SetGoalPayload = z.infer<typeof setGoalPayload>;
 export type UpdateProfilePayload = z.infer<typeof updateProfilePayload>;
 export type AddMarkerPayload = z.infer<typeof addMarkerPayload>;
 export type ApplyPlanPayload = z.infer<typeof applyPlanPayload>;
+export type ActivityFeedbackPayload = z.infer<typeof activityFeedbackPayload>;
 
 export const isConfirmation = (type: PendingActionType) =>
   (CONFIRMATION_TYPES as readonly string[]).includes(type);
@@ -143,5 +153,7 @@ export function describeProposal(row: Pick<PendingActionRow, "actionType" | "pay
       return "Weekly recap: waiting for your feedback.";
     case "onboarding":
       return "Onboarding in progress.";
+    case "activity_feedback":
+      return "Activity feedback: waiting for a note.";
   }
 }

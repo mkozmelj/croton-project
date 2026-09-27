@@ -4,7 +4,9 @@ import type { ActionExecutor } from "../agent/action-executor.js";
 import type { Orchestrator } from "../agent/orchestrator.js";
 import { authorizedChatOnly } from "./access-control.js";
 import { COMMANDS, type CommandDeps, registerCommands } from "./commands.js";
+import { type FeedbackHandlerDeps, registerFeedbackHandlers } from "./feedback.js";
 import { errorBoundary, registerMessageHandlers } from "./handlers.js";
+import { htmlParseMode } from "./parse-mode.js";
 
 export const TELEGRAM_WEBHOOK_PATH = "/webhook/telegram";
 
@@ -12,17 +14,20 @@ type BotDeps = CommandDeps & {
   authorizedChatId: number;
   orchestrator: Orchestrator;
   executor: ActionExecutor;
+  activityFeedback: FeedbackHandlerDeps;
   logger: Logger;
 };
 
-// Messages, plus the Confirm/Cancel button taps (ADR-007).
+// Messages, plus button taps: Confirm/Cancel (ADR-007) and activity feedback (ADR-018).
 const ALLOWED_UPDATES = ["message", "callback_query"] as const;
 
 // Middleware order matters: error boundary, then access control (ADR-006) before any handler.
 export function configureBot(bot: Bot, deps: BotDeps): Bot {
+  bot.api.config.use(htmlParseMode(deps.logger));
   bot.use(errorBoundary(deps.logger));
   bot.use(authorizedChatOnly(deps.authorizedChatId, deps.logger));
   registerCommands(bot, deps);
+  registerFeedbackHandlers(bot, deps.activityFeedback);
   registerMessageHandlers(bot, deps);
   return bot;
 }

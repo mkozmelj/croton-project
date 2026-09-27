@@ -161,6 +161,31 @@ Concrete, sequential implementation checklist. Supersedes `spec.md` §13's phase
 
 ---
 
+## Phase 6: Post-activity feedback
+
+**Goal:** After a new Strava activity, the bot asks a few one-tap questions (RPE, feel, pain, optional note), stores the answers with the activity, and uses them in chat, plan generation and the Sunday recap (ADR-018).
+
+- [x] `activity_feedback` table per ADR-018 (unique `activity_id`, cascade delete) + migration; `src/db/activity-feedback.ts` with upsert-per-field and "feedback for these activities" reads
+- [x] Question rules (`src/agent/feedback-questions.ts`, pure, tested): full set vs RPE only vs none, from the matched planned workout, duration, field-test/breakthrough result and activity age. Imports never ask
+- [x] Read Strava `perceived_exertion` from `raw_data` when present; store it as `rpe_source = 'strava'` and leave out the RPE rows. Parsed defensively (not in Strava's published reference)
+- [ ] Confirm `perceived_exertion` against a real activity with RPE set in the Strava app and record it in a test fixture
+- [x] Question message sent after the summary (`src/bot/`), inline buttons with `callback_data` `fb:<activityId>:<field>:<value>`; a tap upserts and edits the message to show the answers so far. Unknown or deleted activity → the tap is acknowledged and ignored
+- [x] `activity_feedback` conversation mode in `pending_actions` (`PENDING_ACTION_TYPES` + zod payload), started only by "Pain: Yes" or "Add a note"; the next message is stored raw and acknowledged, and the mode ends. 1 h expiry (ADR-018 implementation notes)
+- [x] Dynamic context: a feedback line per activity in the chat window, a pain line for any pain note in the last 14 days, and a "reduce load" line for two or more reports in 14 days (after the cache breakpoint, ADR-004)
+- [x] Plan generation and the Sunday recap get weekly session-RPE load (RPE × minutes) next to training load, plus the week's feedback lines
+- [x] Failures in the feedback flow go through the existing boundaries (background-task runner, grammy error handler) and send the usual alert; a failed question message must not block or undo the activity summary
+
+- [x] ADR-019: shared plan matcher (`src/training/plan-match.ts`, closest start time, plausible duration, one activity per session), match recorded as `strava_activity_id` on the workout; a matched new activity gets the planned title and a plan/compliance description on Strava (`activity:write`, optional)
+- [ ] `/reauth strava` in production to grant `activity:write`, then check a planned session gets renamed
+
+**Acceptance:** Record a planned interval session: the summary is followed by the full question set. Tap RPE, feel and "Pain: No": the row appears in `activity_feedback` and the message shows the answers. Change the RPE: the row updates, no second row. Record an easy short session: only the RPE row is asked. Tap "Add a note", send a message: it's stored as `note`, and the next message goes to normal chat. Edit the activity title in Strava (an `update` event): the feedback is unchanged. Ask "how did my week feel?": the answer uses the stored feedback. `/import` sends no questions.
+
+**Status: built, not deployed (2026-09-27).** `npm run check` passes (469 tests). The acceptance checks and the Strava RPE confirmation need production.
+
+**Manual steps needed:** none expected (migration `0006` runs on boot). To test the Strava RPE path, set a perceived exertion on one activity in the Strava app.
+
+---
+
 ## Cross-cutting, done once and never revisited per phase
 
 - `npm run check` must pass before any commit that touches `src/` — this isn't a phase, it's a standing rule from Phase 0 onward.

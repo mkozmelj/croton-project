@@ -220,6 +220,13 @@ function formatZoneValue(value: number, unit: ZoneSet["unit"]): string {
 
 // e.g. "bike power (Coggan, % of FTP, FTP 250 W): Z1 Active Recovery <138, Z2 Endurance 138-188, ... W"
 export function describeZoneSet(sport: ZoneSport, kind: ZoneKind, set: ZoneSet): string {
+  const { source, zones, unitLabel } = zoneSetParts(set);
+  return `${sport} ${kind} (${source}): ${zones.join(", ")} ${unitLabel}`;
+}
+
+// The pieces of describeZoneSet: where the set comes from, one "Z2 Endurance 138-188" per
+// zone, and the unit.
+export function zoneSetParts(set: ZoneSet): { source: string; zones: string[]; unitLabel: string } {
   const unitLabel = set.unit === "s/km" ? "/km" : set.unit === "s/100m" ? "/100 m" : set.unit;
   const zones = set.zones.map(({ name, from, to }) => {
     const f = from === null ? null : formatZoneValue(from, set.unit);
@@ -230,16 +237,23 @@ export function describeZoneSet(sport: ZoneSport, kind: ZoneKind, set: ZoneSet):
     return f === t ? `${name} ${f}` : `${name} ${f}-${t}`;
   });
   const source = set.source === "intervals" ? "from Intervals.icu" : set.method;
-  return `${sport} ${kind} (${source}): ${zones.join(", ")} ${unitLabel}`;
+  return { source, zones, unitLabel };
 }
 
 export function describeZones(zones: SportZones | null | undefined): string[] {
-  const lines: string[] = [];
+  return listZoneSets(zones).map(({ sport, kind, set }) => describeZoneSet(sport, kind, set));
+}
+
+// Every stored set, sport by sport.
+export function listZoneSets(
+  zones: SportZones | null | undefined,
+): { sport: ZoneSport; kind: ZoneKind; set: ZoneSet }[] {
+  const sets: { sport: ZoneSport; kind: ZoneKind; set: ZoneSet }[] = [];
   for (const sport of SPORTS) {
     for (const kind of KINDS) {
       const set = zones?.[sport]?.[kind];
-      if (set) lines.push(describeZoneSet(sport, kind, set));
+      if (set) sets.push({ sport, kind, set });
     }
   }
-  return lines;
+  return sets;
 }

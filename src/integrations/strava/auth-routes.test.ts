@@ -26,6 +26,7 @@ function setup() {
     },
     accessToken: async () => "unused",
     athleteId: async () => null,
+    canWriteActivities: async () => false,
   };
   const app = buildServer({ logger: pino({ level: "silent" }) });
   registerStravaAuthRoutes(app, {
