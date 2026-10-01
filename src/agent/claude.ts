@@ -112,10 +112,11 @@ export function createClaude(deps: ClaudeDeps): Claude {
     const outputConfig: OutputConfig = {};
     if (request.outputFormat) outputConfig.format = request.outputFormat;
 
-    // Sonnet 5 thinks adaptively when `thinking` is omitted, so "off" must be explicit.
+    // Sonnet 5.5 thinks adaptively when `thinking` is omitted, so "off" must be explicit. It rejects
+    // `disabled`: `between_tools` (no up-front thinking) is its lowest setting.
     if (model === MODELS.sonnet) {
       if (deps.disableThinking || !policy.effort) {
-        params.thinking = { type: "disabled" };
+        params.thinking = { type: "between_tools" };
       } else {
         params.thinking = { type: "adaptive" };
         outputConfig.effort = policy.effort;

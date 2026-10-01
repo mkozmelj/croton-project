@@ -3,6 +3,7 @@ import { MODELS, type ModelId } from "./env.js";
 // ADR-008: per-model pricing in USD per million tokens. Review together with MODELS on every bump.
 // Checked 2026-09-26 against platform.claude.com/docs/en/about-claude/pricing: Sonnet 5's launch
 // price ($2/$10) became its standard price; the planned rise to $3/$15 was cancelled.
+// Sonnet 5.5 (2026-10-01) kept Sonnet 5's prices and cache rates.
 // Thinking tokens bill as output tokens (ADR-005).
 export type ModelPricing = {
   inputPerMTok: number;

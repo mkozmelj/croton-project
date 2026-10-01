@@ -7,7 +7,7 @@ Personal AI training coach for a single amateur multi-sport athlete. Telegram bo
 ## Non-negotiable rules
 
 - **Single Claude-call wrapper.** Every Claude API call goes through `src/agent/claude.ts`. No other file calls `client.messages.create`/`stream` directly. It owns budget-checking, usage logging, and the cached-system-prompt structure.
-- **Model IDs are constants, never inline strings.** `MODELS.sonnet` = `claude-sonnet-5`, `MODELS.haiku` = `claude-haiku-4-5`, defined once in `src/config/env.ts`. See `docs/02-architecture-decisions.md` ADR-001.
+- **Model IDs are constants, never inline strings.** `MODELS.sonnet` = `claude-sonnet-5-5`, `MODELS.haiku` = `claude-haiku-4-5`, defined once in `src/config/env.ts`. See `docs/02-architecture-decisions.md` ADR-001.
 - **System prompt caching is structural, not optional.** Static training-principles content first (with `cache_control`, 1h TTL), dynamic athlete/session context appended after. Never interpolate anything dynamic before the cache breakpoint. ADR-004.
 - **`conversations.content` is `jsonb`, storing full Anthropic content-block arrays** — not summarized text. Needed to replay `tool_use`/`tool_result` correctly. ADR-003.
 - **Every webhook write is an upsert** (`onConflictDoUpdate`), never a plain insert — Strava retries webhooks and the Intervals.icu sync re-reads recent days. ADR-009.

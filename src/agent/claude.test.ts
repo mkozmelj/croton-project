@@ -88,7 +88,7 @@ describe("createClaude().call", () => {
     const { claude, requests } = setup({ disableThinking: true });
     await claude.call({ callType: "plan_generation", messages });
 
-    expect(requests[0]?.thinking).toEqual({ type: "disabled" });
+    expect(requests[0]?.thinking).toEqual({ type: "between_tools" });
     expect(requests[0]?.output_config).toBeUndefined();
   });
 

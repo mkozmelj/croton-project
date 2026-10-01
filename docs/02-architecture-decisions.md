@@ -11,15 +11,16 @@ ADR-style log of the project's design decisions. Each entry: the problem, the de
 **Problem:** `spec.md` names "Sonnet 4.6" / "Haiku 4.5" with stale pricing (see review doc #1).
 
 **Decision:**
-- Use `claude-sonnet-5` (not `claude-sonnet-4-6`) and `claude-haiku-4-5` (unchanged).
+- Use `claude-sonnet-5-5` and `claude-haiku-4-5`. (Sonnet was `claude-sonnet-5` until 2026-10-01; see the update below.)
 - Pin both as named constants in `src/config/env.ts`:
   ```ts
   export const MODELS = {
-    sonnet: "claude-sonnet-5",
+    sonnet: "claude-sonnet-5-5",
     haiku: "claude-haiku-4-5",
   } as const;
   ```
 - Current pricing (per MTok, for budget calculations; checked 2026-09-26): Sonnet 5 — $2.00 in / $10.00 out (its launch price became the standard price; the planned rise to $3/$15 on 2026-09-01 was cancelled). Haiku 4.5 — $1.00 in / $5.00 out. Re-derive spec.md §8.4's cost estimates against these figures once ADR-005's thinking policy is applied — thinking tokens count as output tokens and will push per-interaction cost above the spec's original estimates for Sonnet-tier calls.
+- **Update (2026-10-01): Sonnet 5 → Sonnet 5.5** (released 2026-09-28). Same prices as Sonnet 5 ($2/$10, 1h cache write $4, cache read $0.20) and the same tokenizer, so `pricing.ts` and the budget estimates are unchanged. What changed in the wrapper: Sonnet 5.5 rejects `thinking: {type: "disabled"}` with a 400, so the ADR-005 kill switch sends `{type: "between_tools"}` instead (needs `@anthropic-ai/sdk` ≥ 0.131). Forced `tool_choice` (`any`/`tool`) is also a 400; the wrapper already only allows `auto`/`none`. Thinking blocks are now bound to the conversation prefix; `history.ts` strips them from replayed turns and the tool loop is append-only, so nothing to change. Effort levels are recalibrated on 5.5: check `llm_usage.output_tokens` per call type after a week against the ADR-005 estimate.
 - Upgrade path: when Anthropic ships a new model, bump the constant, re-run the budget estimate, and re-check this ADR's cost table — never scatter model ID strings through call sites, so an upgrade is a one-line change plus a cost re-check, matching spec.md §9.3's env-var-driven philosophy but formalized as a code constant instead (env-var overrides are unnecessary complexity for a single-operator app — a code change + redeploy is fine).
 
 ---
@@ -100,7 +101,7 @@ system: [
 ],
 ```
 - **1-hour TTL, not the 5-minute default.** The athlete messages sporadically (a few times a day at most, sometimes gaps of many hours) — a 5-minute cache would cold-write on almost every real interaction. The 1-hour TTL's higher write cost (2x vs 1.25x) pays off at ~3 reads, which is the realistic pattern for a day with a couple of messages plus an activity-summary webhook or two.
-- Sonnet 5's minimum cacheable prefix is 1,024 tokens — the ~3-4K token static block clears that comfortably.
+- Sonnet 5's minimum cacheable prefix is 1,024 tokens (Sonnet 5.5: 512) — the ~3-4K token static block clears that comfortably.
 - **Haiku 4.5's minimum is 4,096 tokens** (added 2026-09-24, Phase 1). The Phase 1 static prompt measures 2,204 tokens on Sonnet 5 and 1,557 on Haiku 4.5 (`count_tokens`), so **Haiku calls do not cache at all** — a 1h write is attempted, silently skipped, and billed as plain input. Harmless at Haiku prices (activity summaries, quick chat), but it means ADR-004's savings only apply to Sonnet calls until the static block grows past ~4K Haiku tokens (Phase 4's book distillation will likely get it there). It is also why Phase 1 chat runs on Sonnet (ADR-005, `chat` row): the Phase 1 acceptance check is a cache read on the second message.
 - **Verified 2026-09-24:** two consecutive Sonnet calls through `src/agent/claude.ts` → call 1 `cache_creation_input_tokens: 2198` (all 1h), call 2 `cache_read_input_tokens: 2198`.
 - `STATIC_SYSTEM_PROMPT` must be byte-identical across calls: no timestamps, no non-deterministic serialization anywhere in that string. Verify with `response.usage.cache_read_input_tokens` during Phase 1 smoke-testing — if it's zero after the second call in a session, something in the "static" block isn't actually static.
@@ -123,7 +124,7 @@ system: [
 | `activity_summary` | Haiku | n/a | n/a | Same. |
 | `knowledge_qa` | Haiku (+RAG) | n/a | n/a | Same. |
 
-**Kill switch:** `DISABLE_THINKING=true` in env (validated in `src/config/env.ts`) makes `src/agent/claude.ts` send `thinking: {type: "disabled"}` and drop `effort` on every Sonnet call — flip it in Railway's variables if thinking tokens are eating the monthly budget, no code change or redeploy of new code needed. The per-row policy above lives only inside the wrapper, per the stack doc's "one wrapper for all Claude calls" convention.
+**Kill switch:** `DISABLE_THINKING=true` in env (validated in `src/config/env.ts`) makes `src/agent/claude.ts` send `thinking: {type: "between_tools"}` (Sonnet 5.5's lowest setting; `disabled` is rejected since the 2026-10-01 bump, ADR-001) and drop `effort` on every Sonnet call — flip it in Railway's variables if thinking tokens are eating the monthly budget, no code change or redeploy of new code needed. The per-row policy above lives only inside the wrapper, per the stack doc's "one wrapper for all Claude calls" convention.
 
 **Re-derived monthly estimate (2026-09-24, replaces spec.md §8.4).** Prices from `src/config/pricing.ts` converted at `USD_TO_EUR = 0.92`: Sonnet 5 €2.76 in / €13.80 out / €5.52 1h cache write / €0.28 cache read per MTok; Haiku 4.5 €0.92 in / €4.60 out. Static prefix measured at 2.2K tokens. Thinking token counts are assumptions (low ≈ 0.5–1K, medium ≈ 2–4K per call) — check them against real `llm_usage.output_tokens` after a few weeks.
 

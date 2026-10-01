@@ -2,7 +2,7 @@ import { z } from "zod";
 
 // ADR-001: the only place model IDs are written down. Bump here + re-check pricing.ts.
 export const MODELS = {
-  sonnet: "claude-sonnet-5",
+  sonnet: "claude-sonnet-5-5",
   haiku: "claude-haiku-4-5",
 } as const;
 

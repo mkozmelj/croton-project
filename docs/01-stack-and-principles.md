@@ -11,7 +11,7 @@ The stack is chosen for this project's scale: single user, low traffic, tight bu
 | Framework | Fastify | Fast, schema-validating, plugin-based — good fit for a handful of webhook routes plus a health check. |
 | Database | Neon Postgres (free tier) | Serverless, room to add `pgvector` later if the in-memory RAG approach outgrows itself. Free-tier compute scales to zero after ~5 min idle; the first query after that adds a few hundred ms — irrelevant for a chat bot, but don't read it as "always warm". |
 | ORM | Drizzle | Schema-as-code, generates typed queries, migrations are plain SQL you can read and commit. |
-| LLM | Claude API — `claude-sonnet-5` + `claude-haiku-4-5` | See `02-architecture-decisions.md` ADR-001 for exact IDs and the pinning strategy. |
+| LLM | Claude API — `claude-sonnet-5-5` + `claude-haiku-4-5` | See `02-architecture-decisions.md` ADR-001 for exact IDs and the pinning strategy. |
 | Chat | Telegram Bot API via `grammy` | Free, typed, supports both webhook (prod) and long-polling (local dev) transport with no code change. |
 | Scheduler | `node-cron`, explicit IANA timezone | In-process, zero extra infra, avoids the DST bug of a fixed "19:00 CET" label. |
 | Hosting | Railway, hobby plan | Always-on, GitHub auto-deploy, portable (just Docker + env vars) if a migration is ever needed. |

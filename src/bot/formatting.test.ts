@@ -46,12 +46,12 @@ describe("budgetText", () => {
       capEur: 14,
       level: "normal",
       byModel: [
-        { model: "claude-sonnet-5", calls: 12, costEur: 1.4, cacheReadInputTokens: 24_000 },
+        { model: "claude-sonnet-5-5", calls: 12, costEur: 1.4, cacheReadInputTokens: 24_000 },
       ],
     });
     expect(text).toContain("▰▱▱▱▱▱▱▱▱▱ 10%\n€1.40 of €14.00");
     expect(text).toContain(
-      "• <code>claude-sonnet-5</code>: 12 calls · €1.40 · 24,000 cached tokens read",
+      "• <code>claude-sonnet-5-5</code>: 12 calls · €1.40 · 24,000 cached tokens read",
     );
   });
 });
