@@ -7,7 +7,7 @@ import { BudgetExceededError } from "./budget.js";
 import type { Claude } from "./claude.js";
 import { textOf } from "./history.js";
 
-// spec.md §6.2: once a month, conversation turns older than 60 days are summarized into a
+// Once a month, conversation turns older than 60 days are summarized into a
 // memory note (conversation_memories) and deleted. The context carries the latest notes, so
 // what the athlete said months ago isn't lost when the raw turns go.
 

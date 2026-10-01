@@ -17,7 +17,7 @@ export type ActivitySummarizer = {
   summarize(activity: ActivitySummary): Promise<string | null>;
 };
 
-// spec.md §6.5: Haiku, no thinking (ADR-005 `activity_summary`). The context block already
+// A new activity's comment: Haiku, no thinking (ADR-005 `activity_summary`). The context block already
 // holds this week's totals, so the model can put the session into the week.
 export function createActivitySummarizer(deps: SummaryDeps): ActivitySummarizer {
   return {

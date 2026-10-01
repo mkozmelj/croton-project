@@ -1,6 +1,6 @@
 import { parseCsv } from "./csv.js";
 
-// The TrainingPeaks workout summary export (spec.md §7.4): one row per planned and/or completed
+// The TrainingPeaks workout summary export: one row per planned and/or completed
 // workout. TrainingPeaks doesn't publish the column list, so columns are matched by normalized
 // name and unknown ones are reported, not fatal; only the day and a title or type are required.
 

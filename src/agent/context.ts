@@ -50,7 +50,7 @@ const HEALTH_DAYS = 7;
 const BASELINE_WEEKS = 6;
 // Weekly body-composition averages shown (this week included).
 const BODY_WEEKS = 8;
-// Monthly conversation summaries shown (spec.md §6.2): about half a year.
+// Monthly conversation summaries shown (memory.ts): about half a year.
 const MEMORY_NOTES = 6;
 // ADR-018: pain reports in this window are listed; this many or more ask for less load.
 const PAIN_DAYS = 14;

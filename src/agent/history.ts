@@ -5,7 +5,7 @@ import type {
 } from "@anthropic-ai/sdk/resources/messages/messages";
 import type { ConversationTurn } from "../db/conversations.js";
 
-// spec.md §6.2: the last 20 messages go into every call.
+// The last 20 messages go into every call; older ones become memory notes (memory.ts).
 export const HISTORY_LIMIT = 20;
 
 // Stored turns (ADR-003) → API messages. Thinking blocks are dropped on replay: they are

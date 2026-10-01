@@ -33,8 +33,8 @@ type CallPolicy = {
 };
 
 // ADR-005. `chat` is what the router (classifier.ts) picks when a message touches training
-// but isn't clearly a plan change or an analysis: Sonnet (review doc #13's "default to Sonnet
-// when uncertain") at low effort. `deep` is `/deep <message>`.
+// but isn't clearly a plan change or an analysis: Sonnet (when uncertain, default to
+// Sonnet) at low effort. `deep` is `/deep <message>`.
 export const CALL_POLICIES = {
   chat: { model: MODELS.sonnet, effort: "low", maxTokens: 16_000 },
   plan_generation: { model: MODELS.sonnet, effort: "medium", maxTokens: 16_000 },
@@ -44,7 +44,7 @@ export const CALL_POLICIES = {
   quick_chat: { model: MODELS.haiku, maxTokens: 4_000 },
   activity_summary: { model: MODELS.haiku, maxTokens: 2_000 },
   knowledge_qa: { model: MODELS.haiku, maxTokens: 4_000 },
-  // Monthly memory job (spec.md §6.2).
+  // Monthly memory job (memory.ts).
   conversation_summary: { model: MODELS.haiku, maxTokens: 2_000 },
 } as const satisfies Record<string, CallPolicy>;
 

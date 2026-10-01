@@ -1,6 +1,6 @@
 # Stack & Engineering Principles
 
-The stack from `spec.md` §3 is sound for this project's scale (single user, low traffic, tight budget) and is kept largely as-is. This document pins exact choices and states the conventions that keep the codebase "effective but clean" as Claude Code sessions add to it over time — the audience for the *conventions* section is as much future-Claude as it is Martin.
+The stack is chosen for this project's scale: single user, low traffic, tight budget. This document pins exact choices and states the conventions that keep the codebase "effective but clean" as Claude Code sessions add to it over time — the audience for the *conventions* section is as much future-Claude as it is Martin.
 
 ## 1. Stack (final)
 
@@ -13,12 +13,12 @@ The stack from `spec.md` §3 is sound for this project's scale (single user, low
 | ORM | Drizzle | Schema-as-code, generates typed queries, migrations are plain SQL you can read and commit. |
 | LLM | Claude API — `claude-sonnet-5` + `claude-haiku-4-5` | See `02-architecture-decisions.md` ADR-001 for exact IDs and the pinning strategy. |
 | Chat | Telegram Bot API via `grammy` | Free, typed, supports both webhook (prod) and long-polling (local dev) transport with no code change. |
-| Scheduler | `node-cron`, explicit IANA timezone | In-process, zero extra infra, avoids the DST bug in spec.md's original "19:00 CET" label. |
+| Scheduler | `node-cron`, explicit IANA timezone | In-process, zero extra infra, avoids the DST bug of a fixed "19:00 CET" label. |
 | Hosting | Railway, hobby plan | Always-on, GitHub auto-deploy, portable (just Docker + env vars) if a migration is ever needed. |
 | Lint/format | **Biome** | Single dependency, single config file, formats and lints in one fast pass. Chosen over ESLint+Prettier specifically because this is a solo-maintained project where tool-config maintenance should cost near-zero — two overlapping tools (ESLint's formatting rules vs Prettier) is exactly the kind of accidental complexity to avoid here. |
 | Validation | `zod` | Runtime validation for env vars, webhook payloads, and Claude tool inputs — one library covers all three, and Zod schemas double as the source for Claude tool `input_schema` where needed. |
 | Logging | `pino` | Structured JSON logs, cheap, plays well with Railway's log viewer. No paid log aggregator — Railway's own retention is the log store. |
-| Testing | Vitest | Matches spec.md §14; fast, native TS/ESM support, same mental model as Jest. |
+| Testing | Vitest | Fast, native TS/ESM support, same mental model as Jest. |
 
 ## 2. TypeScript conventions
 
@@ -29,7 +29,7 @@ The stack from `spec.md` §3 is sound for this project's scale (single user, low
 
 ## 3. Project structure conventions
 
-Follow the structure in `spec.md` §10 as the default, with one addition: every directory under `src/integrations/*` and `src/agent/` that does non-trivial parsing or business logic gets a co-located `*.test.ts` file — not a mirrored `test/` tree. Co-location keeps the test next to the code it's testing, which matters more here than a "conventional" separate test tree, because Claude Code sessions editing one file should see its test in the same directory listing.
+Follow the existing layout (see [the architecture guide](guide/05-architecture.md#directory-layout)), with one rule: every directory under `src/integrations/*` and `src/agent/` that does non-trivial parsing or business logic gets a co-located `*.test.ts` file — not a mirrored `test/` tree. Co-location keeps the test next to the code it's testing, which matters more here than a "conventional" separate test tree, because Claude Code sessions editing one file should see its test in the same directory listing.
 
 - **One module, one responsibility.** `tool-handlers.ts` executes tools; it does not also format Telegram messages. `formatting.ts` formats messages; it does not query the DB. If a file starts doing two things, split it — this is cheap now and expensive after month three of accretion.
 - **No default exports.** Named exports only. Default exports make renames and re-exports fragile and don't show up cleanly in "find references."
@@ -37,7 +37,7 @@ Follow the structure in `spec.md` §10 as the default, with one addition: every 
 
 ## 4. Database & Drizzle conventions
 
-- Every table gets `created_at` (already in spec.md's schema) — keep that. Add `updated_at` with an `on update` trigger wherever a row is mutated after creation (`athlete_profile`, `training_plans`), so "when did this last change" is always answerable without git-archaeology.
+- Every table gets `created_at`. Add `updated_at` with an `on update` trigger wherever a row is mutated after creation (`athlete_profile`, `training_plans`), so "when did this last change" is always answerable without git-archaeology.
 - Migrations are generated (`drizzle-kit generate`), never hand-written from scratch, and always committed alongside the schema change in the same commit. Never edit a migration file that's already been applied to any environment — write a new one.
 - Prefer `jsonb` with a `zod` schema validating the shape in application code over adding new columns for every nested field — but don't reach for `jsonb` as a way to avoid modeling relationships properly (e.g. `activities` and `health_metrics` stay first-class tables, not JSON blobs inside `training_plans`).
 
@@ -55,14 +55,14 @@ Follow the structure in `spec.md` §10 as the default, with one addition: every 
 - **Tool definitions live in one file** (`src/agent/tools.ts`) as the single source of truth; `tool-handlers.ts` implements them. Keep tool `description` fields prescriptive about *when* to call the tool, not just what it does — current-generation models under-trigger tools without an explicit "call this when..." nudge.
 - **Structured outputs over prompt-engineered JSON.** Where the agent needs a machine-parseable result (e.g. classification, plan structure), use `output_config.format` with a JSON schema rather than asking the model to "respond only with JSON" and hoping — this avoids an entire class of parsing bugs.
 
-## 7. Testing strategy (concrete version of spec.md §14)
+## 7. Testing strategy
 
 | What | How | Where |
 |---|---|---|
 | Pure functions (cost calculation, message classification heuristics, Strava/Intervals.icu payload parsing) | Vitest, no mocks needed | Co-located `*.test.ts` |
 | DB queries | Vitest against a real (throwaway) Neon branch or local Postgres via `testcontainers` — not mocked Drizzle | `src/db/*.test.ts` |
 | Webhook handlers | Vitest with a constructed Fastify instance + `.inject()`, mocked Claude client | `src/integrations/*/webhook.test.ts` |
-| Full agent flow | Manual, via the real Telegram bot in a test chat — not automated (single-user tool, spec.md §14 is right about this) | N/A |
+| Full agent flow | Manual, via the real Telegram bot in a test chat — not automated (single-user tool) | N/A |
 
 Run `biome check` and `vitest run` in CI (a single GitHub Actions workflow, or as a Railway pre-deploy check if that's simpler) — the goal isn't heavyweight CI, it's "don't deploy something that doesn't typecheck or pass its unit tests."
 

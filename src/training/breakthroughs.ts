@@ -8,7 +8,7 @@ import { VDOT_MAX_DISTANCE_M, VDOT_MIN_DISTANCE_M, vdotFromRace } from "./vdot.j
 // what the athlete can do, and a proposal needs the athlete's confirmation anyway.
 
 // "Clearly": the estimate must beat the current value by 3%. For FTP that's a >= 20-min
-// effort above ~108% of FTP (95% of it = FTP + 3%), past the build plan's "> 105%" example,
+// effort above ~108% of FTP (95% of it = FTP + 3%), past the common "> 105% of FTP" rule,
 // which a correctly set FTP already predicts for an all-out 20 minutes.
 export const BREAKTHROUGH_MARGIN = 1.03;
 // A VDOT jump this large is a GPS glitch or a mis-tagged ride, not fitness.

@@ -4,7 +4,7 @@ import { addDays, localDate, localMidnight, weekStart } from "../../utils/dates.
 import type { TpWorkout } from "./workouts.js";
 
 // TrainingPeaks workouts → `activities` rows (source 'trainingpeaks_import') and a Markdown
-// digest of the plan for the literature corpus (spec.md §7.4).
+// digest of the plan for the literature corpus (ADR-014).
 
 const SPORTS: Record<string, string> = {
   swim: "swim",

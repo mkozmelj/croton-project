@@ -91,11 +91,11 @@ The full walkthrough is in [Setup and deployment](docs/guide/02-setup-and-deploy
 5. [Architecture](docs/guide/05-architecture.md): code layout, request flows, data model, and conventions.
 6. [Security](SECURITY.md): the threat model, how each entry point is authenticated, known limitations, and the operator checklist.
 
-**Design records.** The project was planned before it was built, and the reasoning is kept:
+**Design records**
 
-- [`spec.md`](spec.md): the original vision and design. Parts of it are outdated; the decisions below take precedence.
 - [`docs/02-architecture-decisions.md`](docs/02-architecture-decisions.md): 19 ADRs (why REST instead of MCP, why Intervals.icu instead of Terra, how prompt caching is structured, how the literature corpus is sourced legally, and more).
-- [`docs/03-build-plan.md`](docs/03-build-plan.md): the phase-by-phase build log with acceptance checks.
+- [`docs/01-stack-and-principles.md`](docs/01-stack-and-principles.md): the stack and coding conventions.
+- [`ROADMAP.md`](ROADMAP.md): open work and ideas.
 
 ## Tech stack
 

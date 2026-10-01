@@ -384,7 +384,7 @@ if (env.STRAVA_CLIENT_ID && env.STRAVA_CLIENT_SECRET && tokens) {
   );
 }
 
-// spec.md §6.4: Sunday 19:00 local time, in the IANA zone (never a fixed "CET" offset).
+// The weekly recap: Sunday 19:00 local time, in the IANA zone (never a fixed "CET" offset).
 jobs.push({
   name: "sunday-recap",
   cron: "0 19 * * 0",
@@ -393,7 +393,7 @@ jobs.push({
   },
 });
 
-// spec.md §6.2: turns older than 60 days become a memory note, monthly (1st, 03:30 local).
+// Turns older than 60 days become a memory note, monthly (1st, 03:30 local).
 const conversationMemory = createConversationMemory({
   claude,
   conversations,

@@ -44,7 +44,7 @@ export const conversations = pgTable(
   (table) => [index("conversations_created_at_idx").on(table.createdAt)],
 );
 
-// spec.md §6.2: a summary of conversation turns older than 60 days, which are then deleted
+// A summary of conversation turns older than 60 days, which are then deleted
 // (src/agent/memory.ts). ADR-009: upserted on `through_turn_id`, the last turn it covers, so
 // a run that fails between storing the summary and deleting the turns doesn't store it twice.
 export const conversationMemories = pgTable("conversation_memories", {
@@ -311,7 +311,7 @@ export const pendingActions = pgTable(
   (table) => [index("pending_actions_chat_idx").on(table.chatId, table.actionType)],
 );
 
-// One confirmed plan per training week (spec.md §4.1/§4.2). `plan` is validated with
+// One confirmed plan per training week. `plan` is validated with
 // weekPlanSchema (src/training/plan.ts) when read; workouts carry their calendar event ids.
 export const trainingPlans = pgTable("training_plans", {
   id: serial("id").primaryKey(),

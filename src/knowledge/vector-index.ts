@@ -1,4 +1,4 @@
-// In-memory cosine search (spec.md §5.3; no pgvector while the corpus fits in memory).
+// In-memory cosine search (ADR-014; no pgvector while the corpus fits in memory).
 // Vectors are normalized once on load, so a query is one dot product per chunk.
 
 export type IndexedChunk = {

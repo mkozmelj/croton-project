@@ -1,4 +1,4 @@
-// One-time TrainingPeaks history import (spec.md §7.4). Local only; keep the export in the
+// One-time TrainingPeaks history import. Local only; keep the export in the
 // git-ignored data/ folder.
 //   npm run tp:import -- data/trainingpeaks/workouts.csv --from 2024-01-01 --to 2024-12-31 --dry-run
 //   npm run tp:import -- data/trainingpeaks/workouts.csv --from 2024-01-01 --to 2024-12-31 \

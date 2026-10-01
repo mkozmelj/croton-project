@@ -1,7 +1,7 @@
 import type { NewActivity } from "../../db/activities.js";
 import type { StravaActivity } from "./client.js";
 
-// Strava `sport_type` → the app's sport names (spec.md §4.1). Unlisted types become
+// Strava `sport_type` → the app's sport names. Unlisted types become
 // snake_case of the Strava name, so nothing is dropped.
 const SPORTS: Record<string, string> = {
   Run: "run",

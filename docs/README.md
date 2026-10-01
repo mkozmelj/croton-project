@@ -11,16 +11,8 @@
 
 ## Design records: why it's built this way
 
-The project was designed before it was built. These are the planning documents, kept as written. Read them in this order:
-
-1. [`spec.md`](../spec.md): original vision, architecture, data model, phased plan.
-2. [`00-pre-implementation-review.md`](./00-pre-implementation-review.md): gaps, risks and stale assumptions found in `spec.md`.
-3. [`01-stack-and-principles.md`](./01-stack-and-principles.md): the stack, pinned versions, and coding conventions.
-4. [`02-architecture-decisions.md`](./02-architecture-decisions.md): ADR log of decisions that correct or sharpen `spec.md`. **Where this document and `spec.md` disagree, this document wins.**
-5. [`03-build-plan.md`](./03-build-plan.md): the phase-by-phase implementation checklist and build log.
+- [`02-architecture-decisions.md`](./02-architecture-decisions.md): the ADR log. Each decision with its problem, its alternatives and its reasons.
+- [`01-stack-and-principles.md`](./01-stack-and-principles.md): the stack, pinned versions, and coding conventions.
+- [`../ROADMAP.md`](../ROADMAP.md): what's still open.
 
 `CLAUDE.md` at the project root is the condensed version of these rules for AI coding sessions working in this repo.
-
-### Why these exist
-
-`spec.md` was written as a single upfront design pass. Before any code was written, it was checked against current API behavior (model IDs, pricing, caching semantics) and reviewed for gaps that would cause problems during implementation (conversation storage format, webhook security, state that has to survive restarts). Docs 00–03 are the output of that review. They don't rewrite the spec; they add corrections and decisions on top of it.

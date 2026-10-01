@@ -2,7 +2,7 @@ import { z } from "zod";
 import { addDays, weekStart as mondayOf } from "../utils/dates.js";
 import { PHASES } from "./phase.js";
 
-// A week's training plan (spec.md §4.2, flattened to a list of dated workouts). The same
+// A week's training plan, as a list of dated workouts. The same
 // schema is Claude's structured output for plan generation, the input of the plan-change
 // tool, and what training_plans.plan stores. Rest days are days without workouts.
 

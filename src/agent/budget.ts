@@ -2,7 +2,7 @@ import type { Usage } from "@anthropic-ai/sdk/resources/messages/messages";
 import type { ModelId } from "../config/env.js";
 import { CACHE_MULTIPLIERS, PRICING, USD_TO_EUR } from "../config/pricing.js";
 
-// spec.md §8.3 graduated enforcement, as fractions of the monthly cap
+// Graduated enforcement, as fractions of the monthly cap
 // (the spec's €10.50 / €12.60 / €13.50 / €14.00 on a €14 cap).
 export type BudgetLevel = "normal" | "warning" | "haiku_only" | "minimal" | "stopped";
 

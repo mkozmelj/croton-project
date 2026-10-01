@@ -1,6 +1,8 @@
 # Architecture Decisions
 
-ADR-style log of decisions that correct or sharpen `spec.md`. Each entry: the problem, the decision, and why. Where this doc and `spec.md` disagree, **this doc wins** — `spec.md` stays as the original vision document rather than being edited in place.
+ADR-style log of the project's design decisions. Each entry: the problem, the decision, and why.
+
+> **Note on references.** The ADRs were written against three planning documents that were removed on 2026-10-01 once the build was finished: `spec.md` (the original design), the pre-implementation review ("review doc #N") and the build plan. References to them are kept as written; the files are in git history (`git log --diff-filter=D -- spec.md`). Where an ADR and the original spec disagreed, the ADR was what got built.
 
 ---
 

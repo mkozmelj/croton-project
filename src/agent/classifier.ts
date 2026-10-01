@@ -1,6 +1,6 @@
 import type { CallType } from "./claude.js";
 
-// spec.md §6.1 model router, biased per review doc #13: a plan request misrouted to Haiku
+// The model router (ADR-005), biased towards Sonnet: a plan request misrouted to Haiku
 // gives a worse plan the athlete may follow, a chat message misrouted to Sonnet costs a few
 // cents. So anything that mentions days, sessions, sports, plans, races or thresholds, or
 // asks about the athlete's own data, goes to Sonnet. Haiku only gets the clearly safe cases:
@@ -83,6 +83,6 @@ export function routeMessage({ text, deep, onboarding, followsSonnet }: RouteInp
   if (KNOWLEDGE.test(message) && !PERSONAL.test(message)) {
     return { callType: "knowledge_qa", reason: "general question" };
   }
-  // Uncertain: Sonnet (review doc #13).
+  // Uncertain: Sonnet.
   return { callType: "chat", reason: "default" };
 }

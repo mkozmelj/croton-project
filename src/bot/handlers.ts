@@ -87,7 +87,7 @@ export function registerMessageHandlers(bot: Bot, { orchestrator, executor }: Ha
     await replyWithProposals(ctx, reply);
   }
 
-  // spec.md §6.1: `/deep <message>` forces Sonnet for one message.
+  // `/deep <message>` forces Sonnet for one message (ADR-005).
   bot.command("deep", async (ctx) => {
     const text = ctx.match.trim();
     if (!text) {
