@@ -27,6 +27,8 @@ const lapSchema = z.object({
 
 export const stravaActivitySchema = z.object({
   id: z.number().int(),
+  // The owner. Webhook events are only acted on for the connected athlete's own activities.
+  athlete: z.object({ id: z.number().int() }).nullish(),
   name: z.string().nullish(),
   sport_type: z.string(),
   start_date: z.iso.datetime(),
@@ -63,6 +65,9 @@ export type StravaClient = {
   ): Promise<{ items: FetchedActivity[]; pageLength: number }>;
   // Needs the `activity:write` scope. False when the activity no longer exists.
   updateActivity(id: number, update: ActivityUpdate): Promise<boolean>;
+  // False when Strava rejects our access (revoked, or the refresh token no longer works).
+  // Confirms a deauthorization event before the tokens are dropped: events aren't signed.
+  hasAccess(): Promise<boolean>;
 };
 
 export function createStravaClient({
@@ -120,6 +125,17 @@ export function createStravaClient({
       if (response.status === 404) return false;
       if (!response.ok) throw new StravaApiError(response.status, path);
       return true;
+    },
+
+    async hasAccess() {
+      try {
+        const response = await request("/athlete");
+        if (!response.ok) throw new StravaApiError(response.status, "/athlete");
+        return true;
+      } catch (error) {
+        if (error instanceof StravaAuthError) return false;
+        throw error;
+      }
     },
   };
 }

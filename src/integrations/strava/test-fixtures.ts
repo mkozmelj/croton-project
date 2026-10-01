@@ -6,6 +6,7 @@ import type { StravaActivity } from "./client.js";
 export function stravaActivity(overrides: Partial<StravaActivity> = {}): StravaActivity {
   return {
     id: 111,
+    athlete: { id: 4242 },
     name: "Test Tempo",
     sport_type: "Run",
     start_date: "2026-09-22T05:00:00Z",

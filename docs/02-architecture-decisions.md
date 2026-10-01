@@ -283,6 +283,7 @@ goals
 
 **Implementation notes (Phase 2):**
 - **Strava event checks** need the parsed body (the ids are in it), so the order is: parse JSON → zod → `subscription_id` / `owner_id` check → 200 → async processing. The verify-token handshake is checked before anything else. `STRAVA_SUBSCRIPTION_ID` unset = every event rejected.
+- **Every event is confirmed with the API (2026-10-01).** `subscription_id` and `owner_id` aren't secrets (the athlete id is in the public profile URL), so they only filter noise. A delete is applied only when `GET /activities/{id}` returns 404, a deauthorization only when `GET /athlete` is rejected (401 or a rejected refresh), and a fetched activity is stored only when its `athlete.id` equals the event's `owner_id`. Before this, a forged event could delete stored activities, drop the Strava tokens, or import another athlete's visible activity.
 - Routes that carry secrets in the query string (`/auth/strava/callback`'s `code`, the Strava handshake's `hub.verify_token`) log at `warn` only, so Fastify's per-request info line never writes them.
 
 **Rules for all of them:** compare secrets with `crypto.timingSafeEqual`, never `===`. On failure, respond `401` with an empty body and log a warning (no Telegram alert — random scanners would spam it). Authentication happens before `zod` parsing and before any DB write. Each handler gets a test for the reject path, not just the happy path.

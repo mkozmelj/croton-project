@@ -92,7 +92,7 @@ docs/                   Guides (this folder) and design records
 ### A new Strava activity
 
 1. Strava POSTs an event. The app checks `subscription_id` and `owner_id`, answers `200` immediately, and hands the event to a background task ([ADR-012](../02-architecture-decisions.md#adr-012-every-inbound-webhook-is-authenticated-before-it-is-parsed)).
-2. The activity is **re-fetched from the Strava API**, because the payload isn't trusted, and upserted by `external_id`.
+2. The activity is **re-fetched from the Strava API**, because events aren't signed, and upserted by `external_id` only if it belongs to the connected athlete. Deletes and deauthorizations are confirmed with the API the same way before anything is removed.
 3. On `create` only: summary (numbers rendered by code, comment by Haiku), then threshold proposals (field test or breakthrough), then feedback questions, then the plan match and Strava rename. Each step is ordered so that a failure late in the chain can't hold back what you've already seen.
 
 ### The weekly plan

@@ -25,7 +25,7 @@ Every public route is listed here. Anything not listed returns 404.
 |---|---|
 | `POST /webhook/telegram` | Secret header `X-Telegram-Bot-Api-Secret-Token`, compared in constant time in `onRequest`, **before the body is parsed**. The bot token is never part of the URL. Then a grammY middleware drops every update whose chat isn't `TELEGRAM_AUTHORIZED_CHAT_ID`, without replying, so strangers can't tell the bot exists. That check covers messages and button taps alike. |
 | `GET /webhook/strava` | Subscription handshake. Answers only if `hub.verify_token` matches (constant-time comparison). Logged at `warn` only, so the token never lands in request logs. |
-| `POST /webhook/strava` | Strava doesn't sign events. The app accepts an event only when `subscription_id` equals `STRAVA_SUBSCRIPTION_ID` **and** `owner_id` equals the connected athlete. For creates and updates, it **re-fetches the activity from the Strava API** and ignores the payload. See the [known limitations](#known-limitations). |
+| `POST /webhook/strava` | Strava doesn't sign events, and the ids in them aren't secret, so no event is acted on without confirmation from the Strava API. The app first accepts an event only when `subscription_id` equals `STRAVA_SUBSCRIPTION_ID` **and** `owner_id` equals the connected athlete. Then: creates and updates **re-fetch the activity** (the payload is ignored) and are stored only if its `athlete.id` is the connected athlete; a delete is applied only if Strava returns 404 for the activity; a deauthorization drops the tokens only if Strava actually rejects them. A forged event can cost at most a Strava API call. |
 | `GET /auth/{strava,google}/start` | Requires a live `state`: 24 random bytes, minted by the bot when you send `/connect`, valid for 10 minutes. Without it, nobody can start a flow that links *their* account to your bot. |
 | `GET /auth/{strava,google}/callback` | Consumes the `state` with a single `DELETE … RETURNING`, so a replayed or concurrent callback fails. Checks the granted scopes. Query strings (the OAuth `code`) are never logged. |
 | `GET /`, `/privacy`, `/health` | Static. No data is read. |
@@ -50,17 +50,11 @@ Every public route is listed here. Anything not listed returns 404.
 
 These come from the pre-publication review. They are accepted for a single-user hobby deployment, but you should know about them.
 
-1. **Forged Strava `delete` and deauthorization events.** Strava events aren't signed. The `subscription_id` and `owner_id` checks keep out random traffic, but neither value is a real secret: your Strava athlete ID is in your public profile URL, and subscription IDs are small integers. Someone who knows or guesses both could send:
-   - a `delete` event for any activity ID. The app deletes that activity, and its feedback, from **its own database** without asking Strava. Nothing on Strava itself is affected, and `/import` restores it, minus the feedback.
-   - an athlete event with `authorized: "false"`. The app deletes the stored Strava tokens until you `/reauth strava`.
-   - a `create` event for an activity your account can see. The app re-fetches it from Strava (so it can't invent data), but it doesn't check that the fetched activity is *yours*. It also triggers a summary, which costs a fraction of a cent of the AI budget.
-
-   *Mitigation, not yet implemented:* confirm deletes and deauthorizations against the Strava API before acting (a `404` for the activity, a failing token refresh), and compare the fetched activity's `athlete.id` with the connected athlete.
-2. **No rate limiting on public routes.** Rejections are cheap, but a valid-looking Strava POST costs one database read. Railway's edge provides no per-IP limits by default. A determined flood mostly costs Neon compute time.
-3. **Prompt injection through outside text.** Calendar event titles (anyone can send you an invite), Strava activity names and descriptions, and ingested articles all reach the model as context. The model can't write anything without your tap: proposals are rendered from their stored data, and calendar bookings only touch events the app created itself. So the realistic impact is a misleading reply or proposal. Read proposals before you tap Confirm.
-4. **No key-rotation tool for `TOKEN_ENCRYPTION_KEY`.** The `v1` prefix leaves room for one. Today, rotating the key means setting a new one and reconnecting both services with `/reauth`.
-5. **Development-only dependency advisories.** `npm audit` reports moderate advisories in `drizzle-kit`'s esbuild loader. `drizzle-kit` is a dev dependency used only to generate migrations locally, so it isn't in the production bundle. `npm audit --omit=dev` is clean.
-6. **The failure-alert streak lives in memory**, so a restart can repeat one alert.
+1. **No rate limiting on public routes.** Rejections are cheap, but a Strava POST with the right ids costs a database read and a Strava API call, which counts toward Strava's rate limit. Railway's edge provides no per-IP limits by default. A determined flood mostly costs Neon compute time.
+2. **Prompt injection through outside text.** Calendar event titles (anyone can send you an invite), Strava activity names and descriptions, and ingested articles all reach the model as context. The model can't write anything without your tap: proposals are rendered from their stored data, and calendar bookings only touch events the app created itself. So the realistic impact is a misleading reply or proposal. Read proposals before you tap Confirm.
+3. **No key-rotation tool for `TOKEN_ENCRYPTION_KEY`.** The `v1` prefix leaves room for one. Today, rotating the key means setting a new one and reconnecting both services with `/reauth`.
+4. **Development-only dependency advisories.** `npm audit` reports moderate advisories in `drizzle-kit`'s esbuild loader. `drizzle-kit` is a dev dependency used only to generate migrations locally, so it isn't in the production bundle. `npm audit --omit=dev` is clean.
+5. **The failure-alert streak lives in memory**, so a restart can repeat one alert.
 
 ## Operator checklist
 

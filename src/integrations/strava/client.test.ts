@@ -39,3 +39,27 @@ describe("createStravaClient().updateActivity", () => {
     );
   });
 });
+
+describe("createStravaClient().hasAccess", () => {
+  it("asks for the authenticated athlete", async () => {
+    const { client, requests } = setup(200);
+    expect(await client.hasAccess()).toBe(true);
+    expect(requests[0]?.url).toBe("https://www.strava.com/api/v3/athlete");
+  });
+
+  it("is false when Strava rejects the token, and throws on other failures", async () => {
+    expect(await setup(401).client.hasAccess()).toBe(false);
+    await expect(setup(503).client.hasAccess()).rejects.toThrow(StravaApiError);
+  });
+
+  it("is false when the token can't be refreshed", async () => {
+    const client = createStravaClient({
+      auth: {
+        accessToken: async () => {
+          throw new StravaAuthError("Strava rejected the refresh_token grant");
+        },
+      },
+    });
+    expect(await client.hasAccess()).toBe(false);
+  });
+});

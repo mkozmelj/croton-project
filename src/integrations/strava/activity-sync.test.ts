@@ -6,7 +6,12 @@ import type { StravaClient } from "./client.js";
 import { inMemoryTokens, storedActivity, stravaActivity } from "./test-fixtures.js";
 import type { StravaEvent } from "./webhook.js";
 
-function setup(fetched = stravaActivity() as ReturnType<typeof stravaActivity> | null) {
+function setup(
+  initial = stravaActivity() as ReturnType<typeof stravaActivity> | null,
+  { access = true } = {},
+) {
+  // What Strava's API currently returns for the activity; tests change it mid-way.
+  let fetched = initial;
   const rows = new Map<string, NewActivity>();
   const fetchedIds: number[] = [];
   const newActivities: Activity[] = [];
@@ -18,11 +23,12 @@ function setup(fetched = stravaActivity() as ReturnType<typeof stravaActivity> |
     expiresAt: new Date(),
     scope: null,
   });
-  const client: Pick<StravaClient, "getActivity"> = {
+  const client: Pick<StravaClient, "getActivity" | "hasAccess"> = {
     getActivity: async (id) => {
       fetchedIds.push(id);
       return fetched ? { activity: fetched, raw: fetched } : null;
     },
+    hasAccess: async () => access,
   };
   const sync = createStravaActivitySync({
     client,
@@ -46,7 +52,17 @@ function setup(fetched = stravaActivity() as ReturnType<typeof stravaActivity> |
     },
     logger: pino({ level: "silent" }),
   });
-  return { sync, rows, fetchedIds, newActivities, tokens, deauthorized: () => deauthorized };
+  return {
+    sync,
+    rows,
+    fetchedIds,
+    newActivities,
+    tokens,
+    deauthorized: () => deauthorized,
+    setFetched: (activity: typeof fetched) => {
+      fetched = activity;
+    },
+  };
 }
 
 const event = (overrides: Partial<StravaEvent> = {}): StravaEvent => ({
@@ -80,12 +96,35 @@ describe("createStravaActivitySync().handle", () => {
     expect(newActivities).toEqual([]);
   });
 
-  it("deletes the stored activity on a delete event without fetching", async () => {
-    const { sync, rows, fetchedIds } = setup();
+  it("deletes the stored activity once Strava confirms it's gone", async () => {
+    const { sync, rows, fetchedIds, setFetched } = setup();
     await sync.handle(event());
+    setFetched(null);
     await sync.handle(event({ aspect_type: "delete" }));
     expect(rows.size).toBe(0);
-    expect(fetchedIds).toEqual([111]);
+    expect(fetchedIds).toEqual([111, 111]);
+  });
+
+  it("ignores a delete event for an activity Strava still has", async () => {
+    // Events aren't signed: a forged delete must not remove data.
+    const { sync, rows } = setup();
+    await sync.handle(event());
+    await sync.handle(event({ aspect_type: "delete" }));
+    expect([...rows.keys()]).toEqual(["111"]);
+  });
+
+  it("skips another athlete's activity that the token can see", async () => {
+    const { sync, rows, newActivities } = setup(stravaActivity({ athlete: { id: 999 } }));
+    await sync.handle(event());
+    await sync.handle(event({ aspect_type: "update" }));
+    expect(rows.size).toBe(0);
+    expect(newActivities).toEqual([]);
+  });
+
+  it("skips an activity without an owner in the response", async () => {
+    const { sync, rows } = setup(stravaActivity({ athlete: null }));
+    await sync.handle(event());
+    expect(rows.size).toBe(0);
   });
 
   it("skips an activity the API no longer returns", async () => {
@@ -96,11 +135,20 @@ describe("createStravaActivitySync().handle", () => {
   });
 
   it("drops the tokens when the athlete revokes access", async () => {
-    const { sync, tokens, deauthorized } = setup();
+    const { sync, tokens, deauthorized } = setup(stravaActivity(), { access: false });
     await sync.handle(
       event({ object_type: "athlete", aspect_type: "update", updates: { authorized: "false" } }),
     );
     expect(tokens.current()).toBeNull();
     expect(deauthorized()).toBe(1);
+  });
+
+  it("ignores a deauthorization event while Strava still accepts our access", async () => {
+    const { sync, tokens, deauthorized } = setup(stravaActivity(), { access: true });
+    await sync.handle(
+      event({ object_type: "athlete", aspect_type: "update", updates: { authorized: "false" } }),
+    );
+    expect(tokens.current()).not.toBeNull();
+    expect(deauthorized()).toBe(0);
   });
 });
