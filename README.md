@@ -26,24 +26,7 @@ The code is meant to be forked. Every athlete is different, so the [customizatio
 
 ## How it works
 
-```mermaid
-flowchart LR
-    TG[Telegram chat] <-->|webhook| APP
-    subgraph APP [Node.js app on Railway]
-        BOT[Bot + router] --> ORCH[Agent orchestrator]
-        ORCH --> CL[Claude wrapper<br/>budget, caching, logging]
-        CRON[Scheduler<br/>Sunday recap, syncs]
-        WH[Strava webhook]
-    end
-    CL <--> ANT[Anthropic Claude API]
-    APP <--> DB[(Neon Postgres)]
-    STRAVA[Strava] -->|activity events| WH
-    APP -->|REST| STRAVA
-    APP -->|REST| GCAL[Google Calendar]
-    GARMIN[Garmin watch] --> GC[Garmin Connect] --> ICU[Intervals.icu]
-    CRON -->|poll wellness + thresholds| ICU
-    APP -->|embeddings, optional| OAI[OpenAI]
-```
+![Architecture diagram: the Telegram chat talks over a webhook to the Node.js app on Railway, where the bot and router pass messages to the agent orchestrator and the Claude wrapper, which calls the Anthropic API. The orchestrator makes tool calls to OpenAI embeddings (optional), Neon Postgres, Google Calendar and the Strava REST API. Strava sends activity events to the Strava webhook, and the scheduler polls Intervals.icu, which syncs wellness data from Garmin Connect.](docs/images/how-it-works.webp)
 
 - **One process, one database.** A Fastify server takes the Telegram and Strava webhooks and serves the OAuth callbacks. Scheduled jobs run inside the same process. All state lives in Postgres, so a restart loses nothing.
 - **The model proposes, code writes.** The model never writes to the database or the calendar directly. It creates a *proposal*, the bot shows it with Confirm and Cancel buttons, and code applies it after the tap.
