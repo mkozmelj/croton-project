@@ -299,7 +299,7 @@ goals
 - **Before every commit:** check `git status`/`git diff --cached` for `.env` files, tokens (`sk-ant-`, `sk-`, `npg_`, `ghp_`, bot tokens `<digits>:<35 chars>`), connection strings with passwords, and real chat IDs or personal health values in docs/fixtures. Test fixtures use obviously fake data.
 - **Logs:** `pino` redaction (stack doc §5) is configured in Phase 1, the first phase that handles secrets — not deferred to Phase 5.
 - **If a secret is ever committed:** rotate it at the provider first, then clean history. Removing the file in a later commit doesn't un-leak it.
-- The GitHub repo stays **private**.
+- ~~The GitHub repo stays **private**.~~ **Update (2026-10-01): the repo is public** (MIT). Before publishing, the full history was scanned for keys, tokens, connection strings, chat and athlete IDs, GPS data and health values, and the commit author email was rewritten. The rules above matter more now: anything committed is published.
 
 ---
 

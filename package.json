@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Personal AI training coach — Telegram bot + Claude API",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=24.0.0 <25"
