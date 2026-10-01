@@ -105,8 +105,8 @@ TypeScript (strict, ESM) on Node.js 24 · Fastify · grammY · Drizzle ORM + Neo
 
 Built in six phases, and in daily use by its author:
 
-- **In production:** chat, budget, Strava sync and summaries, Intervals.icu wellness and thresholds, goals, onboarding, weekly planning, Google Calendar, literature search, model routing, conversation memory, token-refresh alerts.
-- **Deployed, acceptance checks pending:** post-activity feedback questions and plan-matched Strava titles (Phase 6).
+- **In production:** chat, budget, Strava sync and summaries, Intervals.icu wellness and thresholds, goals, onboarding, weekly planning, Google Calendar, literature search, model routing, conversation memory, token-refresh alerts, post-activity feedback questions, and plan-matched Strava titles.
+- **Open:** see [`ROADMAP.md`](ROADMAP.md).
 - **Not planned:** multi-user support. The app is single-athlete by design: one authorized chat, one Strava account, one calendar. If you want to coach several people, run one deployment per athlete.
 
 ## License

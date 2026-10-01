@@ -4,17 +4,11 @@ What's still open. The reasons behind the design are in the [ADRs](docs/02-archi
 
 ## Open
 
-### Check Phase 6 in production
+### Strava perceived exertion
 
-Post-activity feedback ([ADR-018](docs/02-architecture-decisions.md#adr-018-post-activity-feedback-lives-in-its-own-table)) and planned titles on Strava ([ADR-019](docs/02-architecture-decisions.md#adr-019-a-matched-strava-activity-takes-the-planned-sessions-title-and-description)) are deployed but not yet checked against real activities.
+Phase 6 (post-activity feedback, planned titles on Strava, the hardened webhook) was checked in production on 2026-10-01.
 
-- [ ] Send `/reauth strava` to grant `activity:write`, then record a planned session. It should be renamed on Strava, with the plan in its description.
-- [ ] Record a planned interval session. The summary should be followed by the full question set (RPE, feel, pain, note). Tap answers: one `activity_feedback` row should appear, and the message should show the answers. Change the RPE: the same row should update.
-- [ ] Record a short easy session. Only the RPE question should be asked.
-- [ ] Tap "Add a note" and send a message. It should be stored as the note, and the next message should go to normal chat.
-- [ ] Rename the activity in Strava. The stored feedback should stay unchanged.
-- [ ] Set a perceived exertion on an activity in the Strava app. Confirm that the `perceived_exertion` field arrives (it isn't in Strava's published API reference), and record its shape in a test fixture.
-- [ ] After the webhook hardening (ADR-012, 2026-10-01): a new activity still gets its summary. The fetched activity must carry `athlete.id`.
+- [ ] Set a perceived exertion on an activity in the Strava app. Confirm the shape of the `perceived_exertion` field (it isn't in Strava's published API reference), and record it in a test fixture with fake values. Until then it's parsed defensively ([ADR-018](docs/02-architecture-decisions.md#adr-018-post-activity-feedback-lives-in-its-own-table)).
 
 ### Literature: scanned books
 
