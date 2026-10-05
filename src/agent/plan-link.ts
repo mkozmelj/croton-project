@@ -55,16 +55,8 @@ export function createPlanLinker(deps: LinkerDeps): PlanLinker {
         log.info("no activity:write scope, Strava activity left as is");
         return matched;
       }
-      const description = withPlanBlock(
-        activity.notes,
-        planBlock({
-          workout: matched,
-          plan: { phase: stored.plan.phase, workouts },
-          movingSeconds: activity.durationSeconds,
-        }),
-      );
+      const description = withPlanBlock(activity.notes, planBlock({ workout: matched, activity }));
       const updated = await deps.strava.updateActivity(Number(activity.externalId), {
-        name: matched.title,
         description,
       });
       if (!updated) log.warn({ externalId: activity.externalId }, "activity gone before update");

@@ -68,7 +68,7 @@ Leave the variables unset and the feature is off. If you want a different source
 
 ### Not renaming Strava activities
 
-When `activity:write` is granted, a matched activity is renamed and gets the plan in its description ([ADR-019](../02-architecture-decisions.md#adr-019-a-matched-strava-activity-takes-the-planned-sessions-title-and-description)). If you don't want that, untick the write permission when connecting Strava. Everything else keeps working.
+When `activity:write` is granted, a matched activity gets the plan in its description (the name is left alone) ([ADR-019](../02-architecture-decisions.md#adr-019-a-matched-strava-activity-gets-the-planned-session-in-its-description)). If you don't want that, untick the write permission when connecting Strava. Everything else keeps working.
 
 ## Literature corpus
 

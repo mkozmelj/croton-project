@@ -63,9 +63,9 @@ describe("createPlanLinker().link", () => {
     expect(plan()?.workouts[0]?.strava_activity_id).toBe("111");
     expect(updates).toHaveLength(1);
     expect(updates[0]?.id).toBe(111);
-    expect(updates[0]?.update.name).toBe("Tempo intervals");
+    expect(updates[0]?.update.name).toBeUndefined();
     expect(updates[0]?.update.description).toMatch(
-      /^Felt windy\n\n📋 Planned: Tempo intervals · 45 min · hard\n/,
+      /^Felt windy\n\nPlan: Tempo intervals \(hard\)\nDuration: 43 \/ 45 min\n/,
     );
   });
 

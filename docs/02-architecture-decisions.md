@@ -500,14 +500,14 @@ Removing DRM is prohibited in the EU even for owned copies (InfoSoc Directive Ar
 
 ---
 
-## ADR-019: A matched Strava activity takes the planned session's title and description
+## ADR-019: A matched Strava activity gets the planned session in its description
 
 **Problem:** A Strava activity says "Morning Run" even when it was the planned tempo session, and nothing on Strava shows what the session was meant to be.
 
 **Decision:**
 - **One matcher** (`src/training/plan-match.ts`) decides which planned workout an activity fulfilled, for both the feedback questions (ADR-018) and Strava: same local day, a fitting sport (a run can fulfil a trail run or a brick), a duration between 40% and 250% of the plan (bricks exempt), and not already taken by another activity. Among several, the exact sport wins, then the closer start time.
 - **The match is recorded on the workout** as `strava_activity_id` in `training_plans.plan`, next to `calendar_event_id`. A second run that day can't take the same session. A plan change from today on replaces today's workouts and drops their links; days before today keep theirs.
-- **Only on `create`**, after all the Telegram messages. `PUT /activities/{id}` sets `name` to the planned title and appends a plain-text block to the description (`src/integrations/strava/plan-description.ts`): planned title, duration and intensity, the structure, targets, field test, minutes done vs planned, session number in the week and the phase. The athlete's or device's own text stays first. A rerun replaces the block, which starts with `📋 Planned:` and runs to the end.
+- **Only on `create`**, after all the Telegram messages. `PUT /activities/{id}` leaves the activity name alone and appends a plain-text block to the description (`src/integrations/strava/plan-description.ts`): a short summary with no emojis: planned title and intensity, duration done / planned, the activity's distance, pace, power and heart rate, the planned target, the main set and a field test. The athlete's or device's own text stays first. A rerun replaces the block, which starts with `Plan:` (the first version's `📋 Planned:` is still replaced) and runs to the end.
 - **Plan and compliance only, never wellness data or the coach's comment.** Strava descriptions are usually public, and the workout `notes` and the Telegram comment can mention HRV, sleep or weight.
 - **`activity:write` is requested but optional.** Connections from before this change don't have it until `/reauth strava`. Without it the match is still recorded and Strava is left alone. The granted scope is read from `oauth_tokens.scope`.
 - Our own edit makes Strava send an `update` event. The sync re-fetches and upserts the activity (its `notes` now include the block). No notification is sent, because only `create` notifies.
