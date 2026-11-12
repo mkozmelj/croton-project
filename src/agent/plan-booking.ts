@@ -1,12 +1,21 @@
 import type { TrainingPlanStore } from "../db/training-plans.js";
 import type { CalendarClient } from "../integrations/google/calendar.js";
 import { workoutEvent, workoutEventId } from "../integrations/google/plan-events.js";
+import type { IntervalsClient } from "../integrations/intervals/client.js";
+import {
+  EXTERNAL_ID_PREFIX,
+  workoutEvent as watchEvent,
+  watchExternalId,
+} from "../integrations/intervals/workouts.js";
 import { sortedWorkouts, type WeekPlan, type Workout } from "../training/plan.js";
+import { addDays } from "../utils/dates.js";
 
 type BookingDeps = {
   plans: Pick<TrainingPlanStore, "forWeek" | "save">;
   // Absent while Google Calendar isn't connected: the plan is saved without events.
   calendar: () => Promise<CalendarClient | null>;
+  // ADR-020: absent while Intervals.icu isn't configured: no watch workouts are sent.
+  intervals?: Pick<IntervalsClient, "athlete" | "events" | "createEvents" | "deleteEvent"> | null;
   timeZone: string;
 };
 
@@ -19,7 +28,12 @@ export type ApplyPlanRequest = {
   agentAnalysis?: string | null;
 };
 
-export type ApplyPlanResult = { booked: number; calendarConnected: boolean };
+export type ApplyPlanResult = {
+  booked: number;
+  calendarConnected: boolean;
+  // Sessions sent to Intervals.icu as watch workouts; null when Intervals.icu isn't configured.
+  watch: { sent: number } | null;
+};
 
 export type PlanBooking = {
   // Saves a confirmed plan and puts its sessions from today on in the calendar. Days before
@@ -51,12 +65,48 @@ export function createPlanBooking(deps: BookingDeps): PlanBooking {
         }
       }
 
+      // After the calendar, before the save: a failure leaves the confirmation to retry, and a
+      // retry deletes whatever a failed attempt created.
+      const watch = deps.intervals
+        ? await sendWatchWorkouts(deps.intervals, plan.week_start, today, upcoming, bookingKey)
+        : null;
+
       await deps.plans.save({
         plan: { ...plan, workouts: sortedWorkouts([...kept, ...booked]) },
         ...(recapNotes !== undefined ? { recapNotes } : {}),
         ...(agentAnalysis !== undefined ? { agentAnalysis } : {}),
       });
-      return { booked: calendar ? booked.length : 0, calendarConnected: calendar !== null };
+      return {
+        booked: calendar ? booked.length : 0,
+        calendarConnected: calendar !== null,
+        watch,
+      };
     },
   };
+}
+
+// Replaces the bot's Intervals.icu workouts from today to the end of the week with the
+// upcoming sessions that are watch workouts (run, bike, swim with steps).
+async function sendWatchWorkouts(
+  intervals: NonNullable<BookingDeps["intervals"]>,
+  weekStart: string,
+  today: string,
+  upcoming: readonly Workout[],
+  bookingKey: string,
+): Promise<{ sent: number }> {
+  const from = today > weekStart ? today : weekStart;
+  for (const event of await intervals.events(from, addDays(weekStart, 6))) {
+    const ours = event.external_id?.startsWith(EXTERNAL_ID_PREFIX) ?? false;
+    if (ours && event.start_date_local.slice(0, 10) >= today) await intervals.deleteEvent(event.id);
+  }
+  const { sportSettings } = await intervals.athlete();
+  const events = upcoming.flatMap((workout, index) => {
+    const event = watchEvent(workout, {
+      externalId: watchExternalId(bookingKey, index),
+      settings: sportSettings,
+    });
+    return event ? [event] : [];
+  });
+  await intervals.createEvents(events);
+  return { sent: events.length };
 }

@@ -48,7 +48,7 @@ Each edit is shown with a Confirm button first. Values are range-checked to catc
 3. checks your calendar for the coming week;
 4. replies with a written recap and a proposed week, as a separate message with **Confirm** and **Cancel**.
 
-Confirm saves the plan and books each session in Google Calendar. If something goes wrong, for example an expired Google token, the buttons stay and you can tap Confirm again once it's fixed. A proposal expires after 24 hours.
+Confirm saves the plan and books each session in Google Calendar. With Intervals.icu set up, run, bike and swim sessions also go to your watch as structured workouts. If something goes wrong, for example an expired Google token, the buttons stay and you can tap Confirm again once it's fixed. A proposal expires after 24 hours.
 
 **During the week.** Ask anything:
 

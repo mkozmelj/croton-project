@@ -131,6 +131,8 @@ Set `INTERVALS_API_KEY` and `INTERVALS_ATHLETE_ID` in Railway. After the restart
 
 `/status` and `/profile` show what arrived.
 
+With Intervals.icu configured, every confirmed plan also sends its run, bike and swim sessions to the Intervals.icu calendar as structured workouts. They reach the watch only if **Upload planned workouts** is enabled under Intervals.icu → Settings → Connections → Garmin. Then sync the watch and find them under the training calendar.
+
 ## 8. Load history and onboard
 
 1. **`/import`** pulls 12 months of Strava activities and 90 days of wellness. It sends no notifications and is safe to repeat. Plan generation uses this history for its baseline: recent volume, biggest weeks, longest sessions.
@@ -180,7 +182,7 @@ Everything is validated at startup by `src/config/env.ts`. A missing or malforme
 | `STRAVA_WEBHOOK_VERIFY_TOKEN` | for Strava webhooks | | Random string |
 | `STRAVA_SUBSCRIPTION_ID` | for Strava webhooks | | Printed by `npm run strava:subscribe -- create` |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | for Calendar | | Web-application OAuth client |
-| `INTERVALS_API_KEY` / `INTERVALS_ATHLETE_ID` | for wellness and thresholds | | Intervals.icu → Settings → Developer Settings |
+| `INTERVALS_API_KEY` / `INTERVALS_ATHLETE_ID` | for wellness, thresholds and watch workouts | | Intervals.icu → Settings → Developer Settings |
 | `OPENAI_API_KEY` | for literature search | | Embeddings only |
 
 ## Updating

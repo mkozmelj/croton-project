@@ -16,6 +16,7 @@ const session = (date: string, start_time = "07:00") => ({
   title: "Easy run",
   duration_minutes: 45,
   intensity: "easy",
+  steps: null,
   structure: [{ segment: "main", description: "45 min Z2" }],
   targets: "HR 130-145",
   field_test: null,

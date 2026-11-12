@@ -104,7 +104,7 @@ Google Calendar is used to book confirmed sessions and to read your existing eve
 
 [Intervals.icu](https://intervals.icu) is a free training-analysis platform and an official Garmin partner. Croton uses it as the bridge for Garmin data that Strava doesn't have: HRV, resting HR, sleep, stress, weight and body fat, CTL/ATL load, and your sport thresholds and zones. Garmin's own Health API is only available to business partners, and the unofficial login libraries break Garmin's terms. [ADR-015](../02-architecture-decisions.md#adr-015-health-data-comes-from-intervalsicu-not-terra) explains the choice.
 
-1. Create an account and go to **Settings → Connections → Garmin**. Connect it and enable **Download wellness data**. Enable activity sync too, so CTL covers every workout.
+1. Create an account and go to **Settings → Connections → Garmin**. Connect it and enable **Download wellness data**. Enable activity sync too, so CTL covers every workout. To start planned sessions from the watch, also enable **Upload planned workouts** (Garmin may ask you to grant the training permission again). See [ADR-020](../02-architecture-decisions.md#adr-020-planned-sessions-go-to-the-watch-through-intervalsicu).
 2. Under **Settings → sport settings**, check that your FTP, LTHR, threshold pace and max HR are current. Croton imports them weekly.
 3. Under **Settings → Developer Settings**, find your **API key** (`INTERVALS_API_KEY`) and **athlete ID** (`INTERVALS_ATHLETE_ID`, for example `i12345`).
 

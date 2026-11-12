@@ -63,6 +63,7 @@ import { type CalendarClient, createCalendarClient } from "./integrations/google
 import { createGoogleAuth } from "./integrations/google/oauth.js";
 import {
   createIntervalsClient,
+  type IntervalsClient,
   intervalsBasicCredentials,
 } from "./integrations/intervals/client.js";
 import { createProfileSync, type ProfileSync } from "./integrations/intervals/profile-sync.js";
@@ -236,8 +237,9 @@ const calendar = async () =>
 const jobs: Job[] = [];
 let wellness: WellnessSync | undefined;
 let profileSync: ProfileSync | undefined;
+let intervalsClient: IntervalsClient | null = null;
 if (env.INTERVALS_API_KEY && env.INTERVALS_ATHLETE_ID) {
-  const intervalsClient = createIntervalsClient({
+  intervalsClient = createIntervalsClient({
     apiKey: env.INTERVALS_API_KEY,
     athleteId: env.INTERVALS_ATHLETE_ID,
   });
@@ -455,7 +457,12 @@ configureBot(bot, {
     goals,
     profile,
     fitness,
-    booking: createPlanBooking({ plans, calendar, timeZone: env.TIMEZONE }),
+    booking: createPlanBooking({
+      plans,
+      calendar,
+      intervals: intervalsClient,
+      timeZone: env.TIMEZONE,
+    }),
     timeZone: env.TIMEZONE,
   }),
   usage,

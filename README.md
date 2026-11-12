@@ -16,6 +16,7 @@ The code is meant to be forked. Every athlete is different, so the [customizatio
 |---|---|
 | **Weekly recap and plan** | Every Sunday at 19:00 the bot asks how your week went. You answer in plain language. It compares planned and actual training, looks at recovery trends (HRV, resting HR, sleep, load), and proposes next week's plan with warm-up, main set, cool-down and your own pace, power and heart-rate targets. |
 | **Calendar booking** | Tap **Confirm** and the sessions land in Google Calendar, placed around the events already there. Nothing is written without a tap. |
+| **Workouts on the watch** | Run, bike and swim sessions also go to Intervals.icu as structured workouts (warm-up, repeats, your pace, power and heart-rate targets). From there Intervals.icu sends them to Garmin Connect, so you start them from the watch. |
 | **Mid-week changes** | "I have a tennis match Thursday, move my tempo run." The coach reshuffles the week and asks you to confirm again. |
 | **Activity summaries** | When you finish a workout, Strava notifies the bot. You get the numbers and a short coach comment, plus one-tap questions (RPE, how it felt, any pain). The answers are used in the next plan. |
 | **Planned title on Strava** | If an activity matches a planned session, it is renamed on Strava ("Morning Run" becomes "Tempo 3×8 min"), and the plan goes in the description. |
@@ -45,7 +46,7 @@ For a tour of the code, see [Architecture](docs/guide/05-architecture.md).
 | [Railway](https://railway.com) | Hosting (always-on Node.js, HTTPS) | Yes, or any host with a public HTTPS URL | ~$5 / month (Hobby) |
 | [Strava API](https://developers.strava.com) | Activities, webhooks, renaming activities | Optional, but most features need it | Free |
 | [Google Calendar API](https://developers.google.com/calendar) | Booking planned sessions | Optional | Free |
-| [Intervals.icu](https://intervals.icu) | Garmin wellness (HRV, sleep, resting HR, weight) and thresholds | Optional | Free (donations welcome) |
+| [Intervals.icu](https://intervals.icu) | Garmin wellness (HRV, sleep, resting HR, weight), thresholds, and planned workouts to the watch | Optional | Free (donations welcome) |
 | [OpenAI API](https://platform.openai.com) | Embeddings for literature search | Optional | Cents per ingest, but OpenAI requires a ~$5 prepaid minimum |
 
 The app starts with only the required services. Each optional integration turns on when its environment variables are set, and the bot tells you what isn't connected. Prices change, so check them before relying on these numbers.
@@ -76,7 +77,7 @@ The full walkthrough is in [Setup and deployment](docs/guide/02-setup-and-deploy
 
 **Design records**
 
-- [`docs/02-architecture-decisions.md`](docs/02-architecture-decisions.md): 19 ADRs (why REST instead of MCP, why Intervals.icu instead of Terra, how prompt caching is structured, how the literature corpus is sourced legally, and more).
+- [`docs/02-architecture-decisions.md`](docs/02-architecture-decisions.md): 20 ADRs (why REST instead of MCP, why Intervals.icu instead of Terra, how prompt caching is structured, how the literature corpus is sourced legally, and more).
 - [`docs/01-stack-and-principles.md`](docs/01-stack-and-principles.md): the stack and coding conventions.
 - [`ROADMAP.md`](ROADMAP.md): open work and ideas.
 

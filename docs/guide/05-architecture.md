@@ -28,6 +28,7 @@ flowchart TB
     CL -->|tool calls| TH[tool handlers] -->|proposals only| PA[(pending_actions)]
     CMD -->|Confirm tap| EX[action executor] --> DB
     EX --> GC[Google Calendar]
+    EX --> IW[Intervals.icu workouts → Garmin]
     SW --> BG[background tasks] --> SYNC[Strava sync] --> DB
     SYNC --> SUM[summary + markers + feedback questions] --> NOTE[notifier → Telegram]
     CR --> ICU[Intervals.icu sync] --> DB
@@ -53,7 +54,7 @@ src/
 ├── integrations/
 │   ├── strava/         OAuth, REST client, webhook, activity sync, history import, mapper
 │   ├── google/         OAuth, Calendar REST client, plan → events
-│   ├── intervals/      REST client, wellness sync, threshold/profile sync, mappers
+│   ├── intervals/      REST client, wellness sync, threshold/profile sync, mappers, plan → watch workouts
 │   ├── trainingpeaks/  CSV import CLI
 │   ├── oauth-crypto.ts AES-256-GCM for stored tokens
 │   └── token-refresh.ts retry, backoff, and alert-once logic
@@ -87,7 +88,7 @@ docs/                   Guides (this folder) and design records
 
 ### A confirmation tap
 
-`callback_data = pa:<id>:ok`. The executor consumes the row with `DELETE … RETURNING` (so a double tap runs once), validates the payload with zod again, and applies it: writes goals, markers or the profile, or saves the plan and books it in Google Calendar with deterministic event IDs, so a retry never duplicates events. On failure the row is restored and the buttons stay ([ADR-007](../02-architecture-decisions.md#adr-007-pending-action-state-is-persisted-not-in-memory)).
+`callback_data = pa:<id>:ok`. The executor consumes the row with `DELETE … RETURNING` (so a double tap runs once), validates the payload with zod again, and applies it: writes goals, markers or the profile, or saves the plan and books it in Google Calendar with deterministic event IDs, so a retry never duplicates events. Run, bike and swim sessions with steps also go to Intervals.icu as workouts; the bot first deletes its own `croton:` events from today on, so retries and plan changes don't duplicate them ([ADR-020](../02-architecture-decisions.md#adr-020-planned-sessions-go-to-the-watch-through-intervalsicu)). On failure the row is restored and the buttons stay ([ADR-007](../02-architecture-decisions.md#adr-007-pending-action-state-is-persisted-not-in-memory)).
 
 ### A new Strava activity
 

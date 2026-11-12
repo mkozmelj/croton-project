@@ -9,7 +9,7 @@ import {
   MARKER_SPORTS,
   type Marker,
 } from "../training/markers.js";
-import { weekPlanSchema, workoutSchema } from "../training/plan.js";
+import { storedWorkoutFields, weekPlanSchema, workoutSchema } from "../training/plan.js";
 import { formatDuration } from "./activity-format.js";
 import { planText } from "./plan-format.js";
 
@@ -75,7 +75,9 @@ export const addMarkerPayload = z.object({ markers: z.array(markerSchema).min(1)
 
 export const applyPlanPayload = z.object({
   plan: weekPlanSchema.extend({
-    workouts: z.array(workoutSchema.extend({ calendar_event_id: z.string().nullish() })),
+    workouts: z.array(
+      workoutSchema.extend({ ...storedWorkoutFields, calendar_event_id: z.string().nullish() }),
+    ),
   }),
   recapNotes: z.string().nullable(),
   agentAnalysis: z.string().nullable(),

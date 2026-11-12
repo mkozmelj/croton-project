@@ -512,3 +512,27 @@ Removing DRM is prohibited in the EU even for owned copies (InfoSoc Directive Ar
 - **`activity:write` is requested but optional.** Connections from before this change don't have it until `/reauth strava`. Without it the match is still recorded and Strava is left alone. The granted scope is read from `oauth_tokens.scope`.
 - Our own edit makes Strava send an `update` event. The sync re-fetches and upserts the activity (its `notes` now include the block). No notification is sent, because only `create` notifies.
 - A failed update (`StravaApiError`, `StravaAuthError`) goes through the background-task runner like any other Strava failure: a log line and the usual Telegram alert.
+
+## ADR-020: Planned sessions go to the watch through Intervals.icu
+
+**Problem:** The athlete re-creates each planned interval session in Garmin Connect by hand to run it from the watch. Garmin's Training API, which pushes workouts to Garmin Connect, is only open to approved business partners, and the unofficial login libraries break Garmin's terms (the same reasons as ADR-015).
+
+**Decision:**
+- **Intervals.icu carries the workouts.** It's an official Garmin partner, and with **Upload planned workouts** on under Settings → Connections → Garmin, it sends the planned workouts on its calendar to Garmin Connect. The bot puts them there with the API key it already has (`INTERVALS_API_KEY`), so nothing new is configured.
+- **The plan carries structured steps.** `workoutSchema.steps` (in `src/training/plan.ts`) is a list of blocks: `repeat` plus steps, each with a word-only `label`, a duration *or* a distance, and an optional target `{ metric: power | hr | pace, min, max }`. Targets are absolute numbers from the athlete's zones: W, bpm, s/km, or s/100 m for swims. The free-text `structure` stays as it is for the calendar, `/plan` and Strava. Steps are `null` for sports that aren't watch workouts. Plans stored before this change parse with `steps: null`.
+- **Code writes Intervals.icu's workout text, Claude doesn't** (`src/integrations/intervals/workouts.ts`). Checked against real parses (`workout_doc`) on 2026-11-12:
+  - `- Tempo 1km 4:50-5:00/km Pace`, `- 8m 235-250w`, `- 300mtr 2:05-2:15/100m Pace`, `1h5m30s` durations, and a `4x` line opening a repeat block all parse. `m` is minutes and metres are `mtr`.
+  - **Absolute bpm isn't parsed at all** (`120-140bpm`, `120-140 bpm`, `130bpm HR` and the rest come back with no target). Heart rate goes as % of LTHR with one decimal (`85.5-90.2% LTHR` parses), computed from the LTHR **Intervals.icu** holds for that sport, so it converts back to the intended bpm even when the bot's own LTHR marker differs. Without an LTHR there, the step is sent without a target.
+  - Labels are stripped to letters, spaces, hyphens and apostrophes, so a label can't be read as a duration or target.
+  - Pace isn't sent for the bike.
+- **Sports:** run and trail run (as `Run`), bike (`Ride`), swim (`Swim`). Strength, tennis, mobility and other sessions aren't sent. Neither is a brick: it's two sports in one session. A session whose steps fail `stepIssues()` isn't sent either.
+- **Booking order on Confirm** (`src/agent/plan-booking.ts`): calendar, then Intervals.icu, then the save. Every bot event has an `external_id` starting with `croton:` (`croton:<bookingKey>:<index>`). Before sending, the bot lists the week's Intervals.icu events from today on and deletes its own. A plan change or a retry after a failure part-way therefore never leaves duplicates, and the athlete's own Intervals.icu workouts aren't touched. The bot doesn't rely on `upsert=true`: that matches `external_id` only for events "created by the same OAuth application", and API-key calls have none. Days before today are left alone, like the calendar.
+- **Failures:** an `IntervalsApiError` fails the confirmation. The row is restored (ADR-007), the athlete gets "Sending the watch workouts to Intervals.icu failed … tap Confirm to retry", and nothing is saved until it works.
+- **Cost:** the steps add roughly 100–200 output tokens per session to plan generation, about €0.02 a week on Sonnet. The Intervals.icu API is free.
+
+**Consequences:**
+- A plan change via chat must also re-emit steps. `propose_week_plan` takes the same schema, so they're required there as well.
+- Intervals.icu matches activities to planned workouts too, so its own compliance view starts working (see the ROADMAP idea about planned vs actual intervals).
+- The send window and sport support on Garmin's side are Intervals.icu's. One forum report says pace *ranges* on interval steps show only as a note on a Fenix 7, so check the first pushed workouts on the watch.
+
+**Revisit if:** Garmin opens its Training API to individuals, or Intervals.icu's workout syntax changes (the parse checks above are the fixture to re-run).

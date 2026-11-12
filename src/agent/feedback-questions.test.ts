@@ -17,6 +17,7 @@ function workout(overrides: Partial<Workout>): Workout {
     title: "Tempo",
     duration_minutes: 45,
     intensity: "hard",
+    steps: null,
     structure: [],
     targets: null,
     field_test: null,

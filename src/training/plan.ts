@@ -30,6 +30,45 @@ const segmentSchema = z.object({
     .describe("Duration/distance, zone and what to do, e.g. '3x8 min Z4, 3 min Z1 jog between'"),
 });
 
+// ADR-020: the watch workout, sent to Intervals.icu (and from there to Garmin Connect). Targets
+// are absolute values read off the athlete's zones; code converts them to Intervals.icu's syntax.
+const stepTargetSchema = z.object({
+  metric: z.enum(["power", "hr", "pace"]),
+  min: z.number().describe("Lower number of the range: W, bpm, or pace in seconds"),
+  max: z.number().describe("Upper number of the range (same as min for a single value)"),
+});
+
+const stepSchema = z.object({
+  label: z
+    .string()
+    .describe("Short cue shown on the watch, words only, e.g. 'Warm-up', 'Tempo', 'Jog'"),
+  duration_seconds: z.number().int().nullable().describe("Set this or distance_meters, not both"),
+  distance_meters: z.number().nullable(),
+  target: stepTargetSchema
+    .nullable()
+    .describe(
+      "From the athlete's zones: power in W, hr in bpm, pace in seconds per km (run) or per 100 m (swim). null for an untargeted step such as rest",
+    ),
+});
+
+const stepBlockSchema = z.object({
+  repeat: z.number().int().describe("How many times the steps run in a row; 1 for once"),
+  steps: z.array(stepSchema),
+});
+
+export type StepBlock = z.infer<typeof stepBlockSchema>;
+export type Step = z.infer<typeof stepSchema>;
+
+const stepsSchema = z
+  .array(stepBlockSchema)
+  .nullable()
+  .describe(
+    "The session as a watch workout, for run, trail_run, bike and swim sessions; null for other sports. Blocks in order, e.g. warm-up (repeat 1), intervals with their recoveries (repeat 4), cool-down (repeat 1). It must match structure and add up to about duration_minutes",
+  );
+
+// Plans stored before ADR-020 have no steps.
+const storedStepsSchema = stepsSchema.default(null);
+
 export const workoutSchema = z.object({
   date: z.iso.date().describe("Local date, YYYY-MM-DD, inside the planned week"),
   start_time: z.string().describe("Local start time, HH:MM (24 h)"),
@@ -38,6 +77,7 @@ export const workoutSchema = z.object({
   duration_minutes: z.number().int(),
   intensity: z.enum(["recovery", "easy", "moderate", "hard", "race"]),
   structure: z.array(segmentSchema),
+  steps: stepsSchema,
   targets: z
     .string()
     .nullable()
@@ -75,9 +115,13 @@ export type Workout = WorkoutInput & {
 };
 export type WeekPlan = Omit<WeekPlanInput, "workouts"> & { workouts: Workout[] };
 
+// A workout as stored or held in a pending proposal (which may predate ADR-020).
+export const storedWorkoutFields = { steps: storedStepsSchema };
+
 const storedPlanSchema = weekPlanSchema.extend({
   workouts: z.array(
     workoutSchema.extend({
+      ...storedWorkoutFields,
       calendar_event_id: z.string().nullish(),
       strava_activity_id: z.string().nullish(),
     }),

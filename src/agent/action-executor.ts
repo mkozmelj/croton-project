@@ -83,10 +83,13 @@ export function createActionExecutor(deps: ExecutorDeps): ActionExecutor {
           recapNotes: payload.recapNotes,
           agentAnalysis: payload.agentAnalysis,
         });
+        const watch = result.watch
+          ? ` ${result.watch.sent} watch workout${result.watch.sent === 1 ? "" : "s"} sent to Intervals.icu.`
+          : "";
         if (!result.calendarConnected) {
-          return "Plan saved. Google Calendar isn't connected, so nothing was booked (/connect calendar). /plan shows the week.";
+          return `Plan saved. Google Calendar isn't connected, so nothing was booked (/connect calendar).${watch} /plan shows the week.`;
         }
-        return `Plan saved and ${result.booked} session${result.booked === 1 ? "" : "s"} put in your calendar. /plan shows the week.`;
+        return `Plan saved and ${result.booked} session${result.booked === 1 ? "" : "s"} put in your calendar.${watch} /plan shows the week.`;
       }
 
       case "recap":

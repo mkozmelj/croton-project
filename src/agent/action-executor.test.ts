@@ -8,7 +8,9 @@ import { inMemoryPending } from "./test-helpers.js";
 const NOW = new Date("2026-09-24T10:00:00Z");
 const later = new Date(NOW.getTime() + 60_000);
 
-function setup(options: { bookingFails?: boolean; goalConflict?: boolean } = {}) {
+function setup(
+  options: { bookingFails?: boolean; goalConflict?: boolean; watchSent?: number } = {},
+) {
   const pending = inMemoryPending(() => NOW);
   const created: NewGoal[] = [];
   const recorded: Marker[][] = [];
@@ -38,7 +40,11 @@ function setup(options: { bookingFails?: boolean; goalConflict?: boolean } = {})
       apply: async (request) => {
         if (options.bookingFails) throw new Error("calendar down");
         bookings.push(request);
-        return { booked: 2, calendarConnected: true };
+        return {
+          booked: 2,
+          calendarConnected: true,
+          watch: options.watchSent === undefined ? null : { sent: options.watchSent },
+        };
       },
     },
     timeZone: "Europe/Ljubljana",
@@ -147,6 +153,17 @@ describe("createActionExecutor", () => {
     expect(await pending.store.live(1, ["onboarding"])).toHaveLength(0);
   });
 
+  it("says how many watch workouts went to Intervals.icu", async () => {
+    const { executor, pending } = setup({ watchSent: 1 });
+    const row = await pending.store.create({
+      chatId: 1,
+      actionType: "apply_plan",
+      payload: { plan, recapNotes: null, agentAnalysis: null, reason: null },
+      expiresAt: later,
+    });
+    expect(await executor.confirm(row.id, 1)).toContain("1 watch workout sent to Intervals.icu.");
+  });
+
   it("books a plan with a booking key stable across retries", async () => {
     const { executor, pending, bookings } = setup();
     const row = await pending.store.create({
@@ -155,7 +172,9 @@ describe("createActionExecutor", () => {
       payload: { plan, recapNotes: "fine", agentAnalysis: "recap", reason: null },
       expiresAt: later,
     });
-    expect(await executor.confirm(row.id, 1)).toContain("2 sessions put in your calendar");
+    const text = await executor.confirm(row.id, 1);
+    expect(text).toContain("2 sessions put in your calendar");
+    expect(text).not.toContain("Intervals.icu");
     expect(bookings[0]).toMatchObject({
       bookingKey: `plan-${row.id}`,
       today: "2026-09-24",

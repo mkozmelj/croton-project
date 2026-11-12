@@ -132,7 +132,7 @@ export const CHAT_TOOLS: Tool[] = [
   {
     name: TOOL_NAMES.plan,
     description:
-      "Propose the complete plan for one week (this week or next week) in place of the stored one. Call this when the athlete asks to change the plan (move, swap, add, drop or shorten sessions) or asks for a plan outside the Sunday recap. Include every session of the week, unchanged ones too. Sessions on days before today are kept from the stored plan whatever you pass. Keep the week's intensity distribution. Nothing is saved or put in the calendar until the athlete confirms.",
+      "Propose the complete plan for one week (this week or next week) in place of the stored one. Call this when the athlete asks to change the plan (move, swap, add, drop or shorten sessions) or asks for a plan outside the Sunday recap. Include every session of the week, unchanged ones too. Sessions on days before today are kept from the stored plan whatever you pass. Keep the week's intensity distribution. Give every run, bike and swim session its watch steps, numbers from the athlete's zones. Nothing is saved or put in the calendar until the athlete confirms.",
     input_schema: inputSchema(proposePlanInput),
   },
   SEARCH_LITERATURE_TOOL,

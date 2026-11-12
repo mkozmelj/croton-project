@@ -20,6 +20,7 @@ const workout = (overrides: Partial<Workout> = {}): Workout => ({
   title: "Tempo <intervals>",
   duration_minutes: 55,
   intensity: "hard",
+  steps: null,
   structure: [
     { segment: "warmup", description: "15 min Z2" },
     { segment: "main", description: "3x8 min Z4 & 3 min jog" },

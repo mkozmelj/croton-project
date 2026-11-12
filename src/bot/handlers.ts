@@ -7,6 +7,7 @@ import type { Reply } from "../agent/reply.js";
 import type { PendingActionRow } from "../db/pending-actions.js";
 import { GoogleCalendarError } from "../integrations/google/calendar.js";
 import { GoogleAuthError } from "../integrations/google/oauth.js";
+import { IntervalsApiError } from "../integrations/intervals/client.js";
 import { TokenRefreshError } from "../integrations/token-refresh.js";
 import { actionResultText, budgetRefusalText, failureText, modelText } from "./formatting.js";
 import { esc, splitMessage } from "./html.js";
@@ -132,6 +133,12 @@ export function registerMessageHandlers(bot: Bot, { orchestrator, executor }: Ha
       if (error instanceof TokenRefreshError) {
         await ctx.reply(
           "⚠️ Google didn't answer when renewing calendar access. Nothing was lost; tap Confirm to retry in a bit.",
+        );
+        return;
+      }
+      if (error instanceof IntervalsApiError) {
+        await ctx.reply(
+          `⚠️ Sending the watch workouts to Intervals.icu failed (${esc(error.message)}). Nothing was lost; tap Confirm to retry.`,
         );
         return;
       }
