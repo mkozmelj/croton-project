@@ -22,7 +22,8 @@ Phase 6 (post-activity feedback, planned titles on Strava, the hardened webhook)
 [ADR-020](docs/02-architecture-decisions.md#adr-020-planned-sessions-go-to-the-watch-through-intervalsicu) sends planned sessions to Garmin through Intervals.icu.
 
 - [ ] Enable **Upload planned workouts** in Intervals.icu → Settings → Connections → Garmin. Today it's off, and so is Garmin training access.
-- [ ] Deploy, confirm a plan, and check one run, one bike and one swim on the watch: steps, repeats, and that pace ranges and % LTHR heart-rate targets arrive as targets, not notes.
+- [x] First pool swim from the watch (2026-11-12): steps and pace targets worked; rests showed as 0 m swims, fixed with step intensity.
+- [ ] Check the next swim's rests (rest steps, last rest in a repeat, total distance), and one run and one bike: repeats, and that pace ranges and % LTHR heart-rate targets arrive as targets, not notes.
 
 ## Ideas, not planned
 

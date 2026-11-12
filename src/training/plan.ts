@@ -38,18 +38,34 @@ const stepTargetSchema = z.object({
   max: z.number().describe("Upper number of the range (same as min for a single value)"),
 });
 
-const stepSchema = z.object({
+export const STEP_INTENSITIES = ["warmup", "active", "recovery", "rest", "cooldown"] as const;
+
+const stepFields = {
   label: z
     .string()
-    .describe("Short cue shown on the watch, words only, e.g. 'Warm-up', 'Tempo', 'Jog'"),
-  duration_seconds: z.number().int().nullable().describe("Set this or distance_meters, not both"),
+    .describe(
+      "Short cue shown on the watch, words only (no numbers), e.g. 'Warm-up', 'Drill', 'Tempo'",
+    ),
+  duration_seconds: z
+    .number()
+    .int()
+    .nullable()
+    .describe("Set this or distance_meters, not both (a distance wins)"),
   distance_meters: z.number().nullable(),
   target: stepTargetSchema
     .nullable()
     .describe(
-      "From the athlete's zones: power in W, hr in bpm, pace in seconds per km (run) or per 100 m (swim). null for an untargeted step such as rest",
+      "From the athlete's zones: power in W, hr in bpm, pace in seconds per km (run) or per 100 m (swim). null for rest and other untargeted steps",
     ),
-});
+};
+
+const intensitySchema = z
+  .enum(STEP_INTENSITIES)
+  .describe(
+    "warmup / cooldown for those steps; active for work; recovery for easy moving recovery (jog, easy spin); rest for standing or wall rest: duration only, no target",
+  );
+
+const stepSchema = z.object({ ...stepFields, intensity: intensitySchema });
 
 const stepBlockSchema = z.object({
   repeat: z.number().int().describe("How many times the steps run in a row; 1 for once"),
@@ -59,15 +75,24 @@ const stepBlockSchema = z.object({
 export type StepBlock = z.infer<typeof stepBlockSchema>;
 export type Step = z.infer<typeof stepSchema>;
 
-const stepsSchema = z
-  .array(stepBlockSchema)
-  .nullable()
-  .describe(
-    "The session as a watch workout, for run, trail_run, bike and swim sessions; null for other sports. Blocks in order, e.g. warm-up (repeat 1), intervals with their recoveries (repeat 4), cool-down (repeat 1). It must match structure and add up to about duration_minutes",
-  );
+const STEPS_DESCRIPTION =
+  "The session as a watch workout, for run, trail_run, bike and swim sessions; null for other sports. Blocks in order, e.g. warm-up (repeat 1), intervals with their recoveries (repeat 4), cool-down (repeat 1). It must match structure and add up to about duration_minutes. Swims: a rest step after the warm-up, as the last step inside every repeat, between sets, and before the cool-down";
 
-// Plans stored before ADR-020 have no steps.
-const storedStepsSchema = stepsSchema.default(null);
+const stepsSchema = z.array(stepBlockSchema).nullable().describe(STEPS_DESCRIPTION);
+
+// Plans stored before ADR-020 have no steps, and steps stored before the intensity field
+// count as work.
+const storedStepsSchema = z
+  .array(
+    z.object({
+      repeat: z.number().int(),
+      steps: z.array(
+        z.object({ ...stepFields, intensity: z.enum(STEP_INTENSITIES).default("active") }),
+      ),
+    }),
+  )
+  .nullable()
+  .default(null);
 
 export const workoutSchema = z.object({
   date: z.iso.date().describe("Local date, YYYY-MM-DD, inside the planned week"),

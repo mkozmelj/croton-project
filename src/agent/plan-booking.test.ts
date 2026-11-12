@@ -134,6 +134,7 @@ describe("createPlanBooking().apply", () => {
               duration_seconds: 2700,
               distance_meters: null,
               target: { metric: "hr", min: 136, max: 150 },
+              intensity: "active",
             },
           ],
         },
@@ -197,7 +198,7 @@ describe("createPlanBooking().apply", () => {
           name: "Easy run",
           type: "Run",
           start_date_local: "2026-09-25T07:00:00",
-          description: "- Easy 45m 80-88.2% LTHR",
+          description: "- Easy 45m 80-88.2% LTHR intensity=active",
           external_id: "croton:plan-7:0",
         }),
       ]);

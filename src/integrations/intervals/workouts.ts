@@ -5,7 +5,10 @@ import type { NewWorkoutEvent, SportSettings } from "./client.js";
 // Connect. The syntax below was checked against real parses (`workout_doc`) on 2026-11-12:
 // `- Tempo 1km 4:50-5:00/km Pace`, `- 8m 235-250w`, `- 300mtr 2:05-2:15/100m Pace`,
 // `- 5m 85.5-90.2% LTHR`, and a `4x` line opening a repeat block. Absolute bpm isn't parsed
-// at all, so heart rate goes as % of the LTHR Intervals.icu holds for that sport.
+// at all, so heart rate goes as % of the LTHR Intervals.icu holds for that sport. A trailing
+// `intensity=rest` (or warmup, active, recovery, cooldown) sets the step's intensity in the
+// workout Garmin gets (checked in the FIT download, 2026-11-13). Without it every step is plain
+// work, and a timed rest in a pool swim shows on the watch as a swim with no distance.
 
 // Plan sport → Intervals.icu activity type. Other sports aren't sent: a watch workout adds
 // nothing to strength, tennis or mobility, and a brick is two sports in one session.
@@ -39,7 +42,8 @@ export function stepIssues(blocks: readonly StepBlock[]): string[] {
       const at = `${where} step ${s + 1}`;
       const hasDuration = step.duration_seconds !== null;
       const hasDistance = step.distance_meters !== null;
-      if (hasDuration === hasDistance) issues.push(`${at}: set duration or distance, not both`);
+      // Both set is fine: the distance wins (the duration is then only an estimate).
+      if (!hasDuration && !hasDistance) issues.push(`${at}: no duration or distance`);
       if (hasDuration && !((step.duration_seconds ?? 0) > 0)) issues.push(`${at}: duration ≤ 0`);
       if (hasDistance && !((step.distance_meters ?? 0) > 0)) issues.push(`${at}: distance ≤ 0`);
       if (step.target && !(step.target.min > 0 && step.target.max > 0)) {
@@ -99,23 +103,28 @@ export function targetText(
 }
 
 // Words only: digits or a leading dash would be read as a duration, target or step marker.
+// Whole words with digits or symbols go ("Drill 50m" → "Drill", not "Drill m").
 export function stepLabel(label: string): string {
   return label
-    .replace(/[^\p{L}\s'-]/gu, " ")
-    .replace(/\s+/g, " ")
+    .split(/\s+/)
+    .filter((word) => /^[\p{L}'-]+$/u.test(word))
+    .join(" ")
     .replace(/^[\s'-]+/, "")
-    .trim()
     .slice(0, 30)
     .trim();
 }
 
 function stepLine(step: Step, sport: Workout["sport"], lthr: number | null): string {
   const amount =
-    step.duration_seconds !== null
-      ? durationText(step.duration_seconds)
-      : distanceText(step.distance_meters ?? 0);
-  const target = step.target ? targetText(step.target, sport, lthr) : null;
-  return ["-", stepLabel(step.label), amount, target].filter(Boolean).join(" ");
+    step.distance_meters !== null
+      ? distanceText(step.distance_meters)
+      : durationText(step.duration_seconds ?? 0);
+  // A rest is untargeted whatever the plan says.
+  const target =
+    step.target && step.intensity !== "rest" ? targetText(step.target, sport, lthr) : null;
+  return ["-", stepLabel(step.label), amount, target, `intensity=${step.intensity}`]
+    .filter(Boolean)
+    .join(" ");
 }
 
 // The workout as Intervals.icu workout text, or null when it has no usable steps.

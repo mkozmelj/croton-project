@@ -17,6 +17,7 @@ const step = (overrides: Partial<Step>): Step => ({
   duration_seconds: 600,
   distance_meters: null,
   target: null,
+  intensity: "active",
   ...overrides,
 });
 
@@ -82,7 +83,9 @@ describe("targetText", () => {
 
 describe("stepLabel", () => {
   it("keeps words only, so the label can't be read as a duration or target", () => {
-    expect(stepLabel("4x1km @ Z4")).toBe("x km Z");
+    expect(stepLabel("4x1km @ Z4")).toBe("");
+    expect(stepLabel("Drill 50m")).toBe("Drill");
+    expect(stepLabel("400m test")).toBe("test");
     expect(stepLabel("- Warm-up")).toBe("Warm-up");
     expect(stepLabel("Ogrevanje čez hrib")).toBe("Ogrevanje čez hrib");
   });
@@ -102,8 +105,7 @@ describe("stepIssues", () => {
     ]);
     expect(issues).toEqual([
       "block 1: repeat must be 1-50",
-      "block 1 step 1: set duration or distance, not both",
-      "block 2 step 1: set duration or distance, not both",
+      "block 1 step 1: no duration or distance",
       "block 3 step 1: target must be positive",
       "block 4: no steps",
     ]);
@@ -114,7 +116,10 @@ describe("workoutText", () => {
   it("renders warm-up, a repeat block and cool-down in the checked syntax", () => {
     const text = workoutText(
       workout([
-        { repeat: 1, steps: [step({ label: "Warm-up", duration_seconds: 900 })] },
+        {
+          repeat: 1,
+          steps: [step({ label: "Warm-up", duration_seconds: 900, intensity: "warmup" })],
+        },
         {
           repeat: 4,
           steps: [
@@ -128,22 +133,86 @@ describe("workoutText", () => {
               label: "Jog",
               duration_seconds: 150,
               target: { metric: "hr", min: 119, max: 136 },
+              intensity: "recovery",
             }),
           ],
         },
-        { repeat: 1, steps: [step({ label: "Cool-down", duration_seconds: 600 })] },
+        {
+          repeat: 1,
+          steps: [step({ label: "Cool-down", duration_seconds: 600, intensity: "cooldown" })],
+        },
       ]),
       170,
     );
     expect(text).toBe(
       [
-        "- Warm-up 15m",
+        "- Warm-up 15m intensity=warmup",
         "",
         "4x",
-        "- Tempo 1km 4:50-5:00/km Pace",
-        "- Jog 2m30s 70-80% LTHR",
+        "- Tempo 1km 4:50-5:00/km Pace intensity=active",
+        "- Jog 2m30s 70-80% LTHR intensity=recovery",
         "",
-        "- Cool-down 10m",
+        "- Cool-down 10m intensity=cooldown",
+      ].join("\n"),
+    );
+  });
+
+  it("uses the distance when a step has both", () => {
+    const text = workoutText(
+      workout([{ repeat: 1, steps: [step({ duration_seconds: 645, distance_meters: 300 })] }], {
+        sport: "swim",
+      }),
+      null,
+    );
+    expect(text).toBe("- Easy 300mtr intensity=active");
+  });
+
+  it("marks swim rests as rest, untargeted, so Garmin doesn't count them as swims", () => {
+    const text = workoutText(
+      workout(
+        [
+          {
+            repeat: 1,
+            steps: [
+              step({
+                label: "Warm-up",
+                duration_seconds: null,
+                distance_meters: 300,
+                intensity: "warmup",
+              }),
+              step({ label: "Rest", duration_seconds: 30, intensity: "rest" }),
+            ],
+          },
+          {
+            repeat: 6,
+            steps: [
+              step({
+                label: "CSS 100m",
+                duration_seconds: null,
+                distance_meters: 100,
+                target: { metric: "pace", min: 105, max: 110 },
+              }),
+              step({
+                label: "Rest",
+                duration_seconds: 20,
+                target: { metric: "pace", min: 200, max: 200 },
+                intensity: "rest",
+              }),
+            ],
+          },
+        ],
+        { sport: "swim" },
+      ),
+      null,
+    );
+    expect(text).toBe(
+      [
+        "- Warm-up 300mtr intensity=warmup",
+        "- Rest 30s intensity=rest",
+        "",
+        "6x",
+        "- CSS 100mtr 1:45-1:50/100m Pace intensity=active",
+        "- Rest 20s intensity=rest",
       ].join("\n"),
     );
   });
@@ -168,7 +237,7 @@ describe("workoutEvent", () => {
       type: "Run",
       name: "Tempo intervals",
       start_date_local: "2026-11-17T07:00:00",
-      description: "- Easy 10m 80-90% LTHR",
+      description: "- Easy 10m 80-90% LTHR intensity=active",
       moving_time: 3300,
       external_id: "croton:plan-7:2",
     });
@@ -177,7 +246,7 @@ describe("workoutEvent", () => {
   it("uses the bike's own LTHR for rides", () => {
     const event = workoutEvent(workout(steps, { sport: "bike" }), { externalId: "x", settings });
     expect(event?.type).toBe("Ride");
-    expect(event?.description).toBe("- Easy 10m 85-95.6% LTHR");
+    expect(event?.description).toBe("- Easy 10m 85-95.6% LTHR intensity=active");
   });
 
   it("skips sports that aren't watch workouts and sessions without steps", () => {
