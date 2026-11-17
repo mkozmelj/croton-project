@@ -1,6 +1,6 @@
 import { and, asc, eq, getTableColumns, gte, lt, sql } from "drizzle-orm";
 import type { Database } from "./client.js";
-import { activities } from "./schema.js";
+import { activities, plannedWorkouts } from "./schema.js";
 
 export type Activity = typeof activities.$inferSelect;
 // Listing queries skip `raw_data`: the full Strava payload (polyline, splits) is 10-50 KB
@@ -49,7 +49,20 @@ export function createActivityStore(db: Database): ActivityStore {
     },
 
     async deleteByExternalId(externalId) {
-      await db.delete(activities).where(eq(activities.externalId, externalId));
+      // ADR-021: the session it fulfilled waits for the athlete's answer again.
+      const id = sql`(select ${activities.id} from ${activities} where ${activities.externalId} = ${externalId})`;
+      await db.batch([
+        db
+          .update(plannedWorkouts)
+          .set({
+            activityId: null,
+            status: "unconfirmed",
+            statusSource: null,
+            updatedAt: new Date(),
+          })
+          .where(eq(plannedWorkouts.activityId, id)),
+        db.delete(activities).where(eq(activities.externalId, externalId)),
+      ]);
     },
 
     async between(from, to) {

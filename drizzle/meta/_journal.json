@@ -50,6 +50,13 @@
       "when": 1790490780177,
       "tag": "0006_phase6_activity_feedback",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794841674033,
+      "tag": "0007_planned_workouts",
+      "breakpoints": true
     }
   ]
 }

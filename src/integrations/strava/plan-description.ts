@@ -1,6 +1,6 @@
 import { formatKm, formatPace } from "../../agent/activity-format.js";
 import type { Activity } from "../../db/activities.js";
-import type { Workout } from "../../training/plan.js";
+import { activeMinutes, type Workout } from "../../training/plan.js";
 
 // The block a matched Strava activity gets in its description: a short plain-text
 // comparison of what was done and what was planned. Strava descriptions are usually public,
@@ -35,7 +35,7 @@ export function planBlock({ workout, activity }: BlockInput): string {
   lines.push(
     workout.sport === "brick" || workout.duration_minutes <= 0
       ? `Duration: ${done} min`
-      : `Duration: ${done} / ${workout.duration_minutes} min`,
+      : `Duration: ${done} / ${activeMinutes(workout)} min`,
   );
   if (activity.distanceMeters) lines.push(`Distance: ${formatKm(activity.distanceMeters)}`);
   if (activity.avgPacePerKm) lines.push(`Avg pace: ${formatPace(activity.avgPacePerKm)}`);

@@ -15,6 +15,9 @@ const session = (date: string, start_time = "07:00") => ({
   sport: "run",
   title: "Easy run",
   duration_minutes: 45,
+  active_minutes: 45,
+  session_type: "run_easy",
+  brick_with_previous: false,
   intensity: "easy",
   steps: null,
   structure: [{ segment: "main", description: "45 min Z2" }],
@@ -126,7 +129,7 @@ describe("createPlanner", () => {
 
     // The 7am session and the one outside the week are dropped and reported.
     expect(reply.text).toContain("Solid week.");
-    expect(reply.text).toContain("2 session(s) had invalid dates or times");
+    expect(reply.text).toContain("2 session(s) had invalid dates, times or session types");
     expect(reply.proposals).toHaveLength(1);
     const payload = pending.rows()[0]?.payload as {
       plan: { workouts: unknown[] };

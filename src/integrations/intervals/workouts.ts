@@ -1,4 +1,4 @@
-import type { Step, StepBlock, Workout } from "../../training/plan.js";
+import { activeMinutes, type Step, type StepBlock, type Workout } from "../../training/plan.js";
 import type { NewWorkoutEvent, SportSettings } from "./client.js";
 
 // ADR-020: planned sessions become Intervals.icu workouts, which Intervals.icu sends to Garmin
@@ -11,7 +11,8 @@ import type { NewWorkoutEvent, SportSettings } from "./client.js";
 // work, and a timed rest in a pool swim shows on the watch as a swim with no distance.
 
 // Plan sport → Intervals.icu activity type. Other sports aren't sent: a watch workout adds
-// nothing to strength, tennis or mobility, and a brick is two sports in one session.
+// nothing to strength, tennis or mobility. A brick's legs go as two workouts (ADR-021); an older
+// single 'brick' session is two sports in one and isn't sent.
 export const WATCH_SPORTS: Partial<Record<Workout["sport"], string>> = {
   run: "Run",
   trail_run: "Run", // a running workout on the watch either way
@@ -163,7 +164,7 @@ export function workoutEvent(
     name: workout.title,
     start_date_local: `${workout.date}T${workout.start_time}:00`,
     description,
-    moving_time: workout.duration_minutes * 60,
+    moving_time: activeMinutes(workout) * 60,
     external_id: externalId,
   };
 }

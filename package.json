@@ -22,7 +22,8 @@
     "strava:subscribe": "tsx --env-file-if-exists=.env src/integrations/strava/subscribe-cli.ts",
     "ingest": "tsx --env-file-if-exists=.env src/knowledge/ingest-cli.ts",
     "eval:embed": "tsx --env-file-if-exists=.env src/knowledge/eval-embed-cli.ts",
-    "tp:import": "tsx --env-file-if-exists=.env src/integrations/trainingpeaks/import-cli.ts"
+    "tp:import": "tsx --env-file-if-exists=.env src/integrations/trainingpeaks/import-cli.ts",
+    "workouts:classify": "tsx --env-file-if-exists=.env src/agent/classify-sessions-cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",

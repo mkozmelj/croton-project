@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SavePlan, StoredPlan } from "../db/training-plans.js";
+import type { ApplyWeek, StoredPlan } from "../db/training-plans.js";
 import type { CalendarClient, EventBody } from "../integrations/google/calendar.js";
 import type {
   CalendarEvent,
@@ -13,6 +13,8 @@ const workout = (date: string, title: string, eventId: string | null = null): Wo
   date,
   start_time: "07:00",
   sport: "run",
+  session_type: "run_easy",
+  brick_with_previous: false,
   title,
   duration_minutes: 45,
   intensity: "easy",
@@ -37,7 +39,7 @@ function setup(
   connected = true,
   intervals: Partial<IntervalsClient> | null = null,
 ) {
-  const saved: SavePlan[] = [];
+  const saved: ApplyWeek[] = [];
   const upserts: [string, EventBody][] = [];
   const deletes: string[] = [];
   const calendar: CalendarClient = {
@@ -50,7 +52,7 @@ function setup(
     },
   };
   const booking = createPlanBooking({
-    plans: { forWeek: async () => stored, save: async (p) => void saved.push(p) },
+    plans: { forWeek: async () => stored, applyWeek: async (week) => void saved.push(week) },
     calendar: async () => (connected ? calendar : null),
     intervals: intervals && {
       athlete: async () => ({ id: "i1", sportSettings: [] }),
@@ -69,8 +71,8 @@ describe("createPlanBooking().apply", () => {
     const stored = {
       weekStart: "2026-09-21",
       plan: plan([
-        workout("2026-09-22", "Done run", "old1"),
-        workout("2026-09-25", "Old Fri", "old2"),
+        { ...workout("2026-09-22", "Done run", "old1"), id: 1, status: "done" },
+        { ...workout("2026-09-25", "Old Fri", "old2"), id: 2, status: "upcoming" },
       ]),
       recapNotes: null,
       agentAnalysis: null,
@@ -89,10 +91,14 @@ describe("createPlanBooking().apply", () => {
       dateTime: "2026-09-26T07:00:00",
       timeZone: "Europe/Ljubljana",
     });
-    expect(saved[0]?.plan.workouts.map((w) => [w.title, w.calendar_event_id])).toEqual([
-      ["Done run", "old1"],
-      ["New Sat", upserts[0]?.[0]],
+    expect(
+      saved[0]?.sessions.map((s) => [s.key, s.workout.title, s.workout.calendar_event_id]),
+    ).toEqual([["croton:plan-7:0", "New Sat", upserts[0]?.[0]]]);
+    // Fri's easy run moved to Sat: kept as replaced, pointing to its successor.
+    expect(saved[0]?.replace).toEqual([
+      { id: 2, status: "replaced", successorKey: "croton:plan-7:0" },
     ]);
+    expect(saved[0]?.header).not.toHaveProperty("workouts");
   });
 
   it("uses the same event ids when a booking is retried", async () => {
@@ -119,7 +125,55 @@ describe("createPlanBooking().apply", () => {
     });
     expect(result).toEqual({ booked: 0, calendarConnected: false, watch: null });
     expect(saved[0]).toMatchObject({ agentAnalysis: "recap" });
-    expect(saved[0]?.plan.workouts[0]?.calendar_event_id).toBeNull();
+    expect(saved[0]?.sessions[0]?.workout.calendar_event_id).toBeNull();
+  });
+
+  it("keeps a session already done today and doesn't plan it again", async () => {
+    const stored = {
+      weekStart: "2026-09-21",
+      plan: plan([
+        { ...workout("2026-09-24", "Morning run", "ev1"), id: 3, status: "done" },
+        {
+          ...workout("2026-09-24", "Evening swim"),
+          sport: "swim",
+          session_type: "swim_technique",
+          id: 4,
+          status: "upcoming",
+        },
+      ]),
+      recapNotes: null,
+      agentAnalysis: null,
+    };
+    const { booking, saved, deletes } = setup(stored);
+    await booking.apply({
+      plan: plan([workout("2026-09-24", "Morning run again"), workout("2026-09-25", "Fri run")]),
+      bookingKey: "k",
+      today: "2026-09-24",
+    });
+    expect(deletes).toEqual([]);
+    expect(saved[0]?.sessions.map((s) => s.workout.title)).toEqual(["Fri run"]);
+    // Dropped on its own day with nothing in its place: a miss, not a replacement.
+    expect(saved[0]?.replace).toEqual([{ id: 4, status: "skipped", successorKey: null }]);
+  });
+
+  it("links a brick's run leg to its bike leg", async () => {
+    const bike: Workout = {
+      ...workout("2026-09-26", "Brick bike"),
+      sport: "bike",
+      session_type: "brick_aerobic",
+    };
+    const run: Workout = {
+      ...workout("2026-09-26", "Brick run"),
+      start_time: "08:30",
+      session_type: "brick_aerobic",
+      brick_with_previous: true,
+    };
+    const { booking, saved } = setup(null, false);
+    await booking.apply({ plan: plan([run, bike]), bookingKey: "k", today: "2026-09-24" });
+    expect(saved[0]?.sessions.map((s) => [s.key, s.brickWithKey])).toEqual([
+      ["croton:k:0", null],
+      ["croton:k:1", "croton:k:0"],
+    ]);
   });
 
   describe("watch workouts (ADR-020)", () => {

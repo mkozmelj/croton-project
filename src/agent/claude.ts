@@ -46,6 +46,8 @@ export const CALL_POLICIES = {
   knowledge_qa: { model: MODELS.haiku, maxTokens: 4_000 },
   // Monthly memory job (memory.ts).
   conversation_summary: { model: MODELS.haiku, maxTokens: 2_000 },
+  // ADR-021 backfill CLI (session-classifier.ts).
+  session_classification: { model: MODELS.haiku, maxTokens: 4_000 },
 } as const satisfies Record<string, CallPolicy>;
 
 export type CallType = keyof typeof CALL_POLICIES;

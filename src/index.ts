@@ -48,6 +48,7 @@ import { createConversationStore } from "./db/conversations.js";
 import { createFitnessMarkerStore } from "./db/fitness-markers.js";
 import { createGoalStore } from "./db/goals.js";
 import { createHealthMetricsStore } from "./db/health-metrics.js";
+import { moveLegacyPlanSessions } from "./db/legacy-plans.js";
 import { createLiteratureStore } from "./db/literature.js";
 import { createUsageStore } from "./db/llm-usage.js";
 import { createOAuthStateStore } from "./db/oauth-states.js";
@@ -90,6 +91,7 @@ import { registerInfoPages } from "./pages.js";
 import { type Job, type Scheduler, startScheduler } from "./scheduler/cron.js";
 import { buildServer } from "./server.js";
 import { createBackgroundTasks } from "./utils/background.js";
+import { localDate } from "./utils/dates.js";
 import { processErrorHandlers, withTimeout } from "./utils/process-guards.js";
 
 const logger = createLogger({
@@ -515,6 +517,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 try {
   await runMigrations(db);
   logger.info({ module: "db" }, "migrations applied");
+  await moveLegacyPlanSessions(db, { today: localDate(new Date(), env.TIMEZONE), logger });
   // Not fatal: search retries the load on its first call.
   await literature.load().catch((error: unknown) => {
     logger.error({ err: error, module: "literature" }, "literature index load failed");

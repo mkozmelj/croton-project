@@ -6,6 +6,8 @@ const tempo: Workout = {
   date: "2026-09-22",
   start_time: "07:00",
   sport: "run",
+  session_type: "run_threshold",
+  brick_with_previous: false,
   title: "Tempo intervals",
   duration_minutes: 60,
   intensity: "hard",

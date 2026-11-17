@@ -1,6 +1,7 @@
 import type { ContentBlockParam } from "@anthropic-ai/sdk/resources/messages/messages";
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   check,
@@ -18,6 +19,8 @@ import {
 } from "drizzle-orm/pg-core";
 import type { Background } from "../training/background.js";
 import { MARKER_METRICS, MARKER_SOURCES, MARKER_SPORTS } from "../training/markers.js";
+import { FIELD_TESTS, STATUS_SOURCES, STORED_SPORTS, WORKOUT_STATUSES } from "../training/plan.js";
+import { SESSION_TYPES } from "../training/session-types.js";
 import type { SportZones } from "../training/zones.js";
 
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -311,8 +314,8 @@ export const pendingActions = pgTable(
   (table) => [index("pending_actions_chat_idx").on(table.chatId, table.actionType)],
 );
 
-// One confirmed plan per training week. `plan` is validated with
-// weekPlanSchema (src/training/plan.ts) when read; workouts carry their calendar event ids.
+// One confirmed plan per training week. Since ADR-021 `plan` holds only the week-level fields
+// (weekHeaderSchema in src/training/plan.ts); the sessions are planned_workouts rows.
 export const trainingPlans = pgTable("training_plans", {
   id: serial("id").primaryKey(),
   weekStart: date("week_start", { mode: "string" }).notNull().unique(),
@@ -323,6 +326,55 @@ export const trainingPlans = pgTable("training_plans", {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+export const PLANNED_WORKOUT_SOURCES = ["plan", "trainingpeaks_import"] as const;
+
+// ADR-021: one row per planned session. Every write is an upsert on `key` (ADR-009). A plan
+// change keeps the old row as 'replaced'; only rows that aren't replaced make up the week.
+export const plannedWorkouts = pgTable(
+  "planned_workouts",
+  {
+    id: serial("id").primaryKey(),
+    key: text("key").notNull().unique(),
+    weekStart: date("week_start", { mode: "string" }).notNull(),
+    date: date("date", { mode: "string" }).notNull(),
+    startTime: text("start_time").notNull(),
+    sport: text("sport", { enum: STORED_SPORTS }).notNull(),
+    sessionType: text("session_type", { enum: SESSION_TYPES }).notNull(),
+    title: text("title").notNull(),
+    intensity: text("intensity").notNull(),
+    durationMinutes: integer("duration_minutes").notNull(),
+    activeMinutes: integer("active_minutes").notNull(),
+    structure: jsonb("structure").$type<unknown>().notNull(),
+    steps: jsonb("steps").$type<unknown>(),
+    targets: text("targets"),
+    fieldTest: text("field_test", { enum: FIELD_TESTS }),
+    notes: text("notes"),
+    status: text("status", { enum: WORKOUT_STATUSES }).notNull().default("upcoming"),
+    statusSource: text("status_source", { enum: STATUS_SOURCES }),
+    activityId: integer("activity_id").references(() => activities.id, { onDelete: "set null" }),
+    brickWith: integer("brick_with").references((): AnyPgColumn => plannedWorkouts.id, {
+      onDelete: "set null",
+    }),
+    replacedBy: integer("replaced_by").references((): AnyPgColumn => plannedWorkouts.id, {
+      onDelete: "set null",
+    }),
+    calendarEventId: text("calendar_event_id"),
+    source: text("source", { enum: PLANNED_WORKOUT_SOURCES }).notNull().default("plan"),
+    // Reserved for the main set read from the laps (a later change); unused in v1.
+    mainSet: jsonb("main_set").$type<unknown>(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    index("planned_workouts_week_idx").on(table.weekStart),
+    index("planned_workouts_date_idx").on(table.date),
+    index("planned_workouts_type_date_idx").on(table.sessionType, table.date),
+    uniqueIndex("planned_workouts_activity_idx")
+      .on(table.activityId)
+      .where(sql`${table.activityId} is not null`),
+  ],
+);
 
 export const LITERATURE_SOURCE_TYPES = ["paper", "article", "book_scan", "notes"] as const;
 

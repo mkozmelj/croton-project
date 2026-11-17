@@ -25,10 +25,21 @@ Phase 6 (post-activity feedback, planned titles on Strava, the hardened webhook)
 - [x] First pool swim from the watch (2026-11-12): steps and pace targets worked; rests showed as 0 m swims, fixed with step intensity.
 - [ ] Check the next swim's rests (rest steps, last rest in a repeat, total distance), and one run and one bike: repeats, and that pace ranges and % LTHR heart-rate targets arrive as targets, not notes.
 
+### Planned workouts, completion and the dashboard
+
+[ADR-021](docs/02-architecture-decisions.md#adr-021-planned-workouts-are-rows-with-a-status-and-a-session-type) stores each planned session as a row with a status and a session type; [ADR-022](docs/02-architecture-decisions.md#adr-022-a-read-only-dashboard-at-a-fixed-url-behind-a-telegram-login) adds the dashboard.
+
+- [x] Review the `session_type` list in ADR-021.
+- [x] `planned_workouts` table, `active_minutes`, two-row bricks, plan changes as `replaced` rows (migration `0007`), stored plans moved to rows on boot. Built, not yet deployed.
+- [ ] After the deploy: `npm run tp:import -- <workouts.csv> --planned`, then `npm run workouts:classify -- --dry-run` and without `--dry-run`.
+- [ ] Status rules, the 08:00 check-in, the completion rate in the Sunday recap and `/status`.
+- [ ] Session-type history in plan generation.
+- [ ] Dashboard: Telegram login (`/setdomain` in BotFather, `DASHBOARD_SESSION_SECRET` on Railway), week, completion and session-type views.
+- [ ] Next release: drop the plan backup table (migration `0008`).
+
 ## Ideas, not planned
 
-- Compare planned intervals with what was actually done, from the activity's laps or FIT file.
+- Compare planned intervals with what was actually done, from the activity's laps or FIT file. This would fill `planned_workouts.main_set`, add intensity to the `partial` status, and give the planner and dashboard main-set numbers (ADR-021).
 - Race-time prediction from fitness markers and load.
 - Injury-risk flags from ACWR and HRV trends.
-- A small web dashboard for trends.
 - Voice messages, transcribed and handled like text.

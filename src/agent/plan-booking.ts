@@ -8,10 +8,11 @@ import {
   watchExternalId,
 } from "../integrations/intervals/workouts.js";
 import { sortedWorkouts, type WeekPlan, type Workout } from "../training/plan.js";
+import { replacements } from "../training/plan-revisions.js";
 import { addDays } from "../utils/dates.js";
 
 type BookingDeps = {
-  plans: Pick<TrainingPlanStore, "forWeek" | "save">;
+  plans: Pick<TrainingPlanStore, "forWeek" | "applyWeek">;
   // Absent while Google Calendar isn't connected: the plan is saved without events.
   calendar: () => Promise<CalendarClient | null>;
   // ADR-020: absent while Intervals.icu isn't configured: no watch workouts are sent.
@@ -37,17 +38,27 @@ export type ApplyPlanResult = {
 
 export type PlanBooking = {
   // Saves a confirmed plan and puts its sessions from today on in the calendar. Days before
-  // today keep the stored plan's sessions and events (they already happened, or didn't).
+  // today, and sessions already done today, keep their stored sessions and events. The
+  // sessions it supersedes stay stored as replaced (ADR-021).
   apply(request: ApplyPlanRequest): Promise<ApplyPlanResult>;
 };
 
 export function createPlanBooking(deps: BookingDeps): PlanBooking {
   return {
     async apply({ plan, bookingKey, today, recapNotes, agentAnalysis }) {
-      const existing = await deps.plans.forWeek(plan.week_start);
-      const kept = (existing?.plan.workouts ?? []).filter((w) => w.date < today);
-      const replaced = (existing?.plan.workouts ?? []).filter((w) => w.date >= today);
-      const upcoming = sortedWorkouts(plan.workouts.filter((w) => w.date >= today));
+      const existing = (await deps.plans.forWeek(plan.week_start))?.plan.workouts ?? [];
+      const settled = (w: Workout) =>
+        w.date < today || w.status === "done" || w.status === "partial";
+      const kept = existing.filter(settled);
+      const replaced = existing.filter((w) => !settled(w));
+      // A session already done today isn't planned a second time.
+      const doneAgain = (w: Workout) =>
+        kept.some(
+          (k) => k.date === w.date && k.sport === w.sport && k.session_type === w.session_type,
+        );
+      const upcoming = sortedWorkouts(
+        plan.workouts.filter((w) => w.date >= today && !doneAgain(w)),
+      ).map(({ id: _id, status: _status, activity_id: _activity, ...w }) => w);
 
       const calendar = await deps.calendar();
       let booked: Workout[] = upcoming.map((w) => ({ ...w, calendar_event_id: null }));
@@ -71,8 +82,21 @@ export function createPlanBooking(deps: BookingDeps): PlanBooking {
         ? await sendWatchWorkouts(deps.intervals, plan.week_start, today, upcoming, bookingKey)
         : null;
 
-      await deps.plans.save({
-        plan: { ...plan, workouts: sortedWorkouts([...kept, ...booked]) },
+      const { workouts: _workouts, ...header } = plan;
+      const sessions = booked.map((workout, index) => {
+        const before = booked[index - 1];
+        const bikeLeg = workout.brick_with_previous && before?.sport === "bike";
+        return {
+          key: sessionKey(bookingKey, index),
+          workout,
+          brickWithKey:
+            bikeLeg && before.date === workout.date ? sessionKey(bookingKey, index - 1) : null,
+        };
+      });
+      await deps.plans.applyWeek({
+        header,
+        sessions,
+        replace: replacements(replaced, sessions, today),
         ...(recapNotes !== undefined ? { recapNotes } : {}),
         ...(agentAnalysis !== undefined ? { agentAnalysis } : {}),
       });
@@ -83,6 +107,12 @@ export function createPlanBooking(deps: BookingDeps): PlanBooking {
       };
     },
   };
+}
+
+// The planned_workouts key of a booked session: stable per confirmation, so a retry upserts
+// the same rows (ADR-009).
+export function sessionKey(bookingKey: string, index: number): string {
+  return `croton:${bookingKey}:${index}`;
 }
 
 // Replaces the bot's Intervals.icu workouts from today to the end of the week with the

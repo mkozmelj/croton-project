@@ -506,7 +506,7 @@ Removing DRM is prohibited in the EU even for owned copies (InfoSoc Directive Ar
 
 **Decision:**
 - **One matcher** (`src/training/plan-match.ts`) decides which planned workout an activity fulfilled, for both the feedback questions (ADR-018) and Strava: same local day, a fitting sport (a run can fulfil a trail run or a brick), a duration between 40% and 250% of the plan (bricks exempt), and not already taken by another activity. Among several, the exact sport wins, then the closer start time.
-- **The match is recorded on the workout** as `strava_activity_id` in `training_plans.plan`, next to `calendar_event_id`. A second run that day can't take the same session. A plan change from today on replaces today's workouts and drops their links; days before today keep theirs.
+- **The match is recorded on the workout** as `strava_activity_id` in `training_plans.plan`, next to `calendar_event_id` (since ADR-021: `planned_workouts.activity_id`, with the session's status). A second run that day can't take the same session. A plan change from today on replaces today's workouts and drops their links; days before today keep theirs.
 - **Only on `create`**, after all the Telegram messages. `PUT /activities/{id}` leaves the activity name alone and appends a plain-text block to the description (`src/integrations/strava/plan-description.ts`): a short summary with no emojis: planned title and intensity, duration done / planned, the activity's distance, pace, power and heart rate, the planned target, the main set and a field test. The athlete's or device's own text stays first. A rerun replaces the block, which starts with `Plan:` (the first version's `📋 Planned:` is still replaced) and runs to the end.
 - **Plan and compliance only, never wellness data or the coach's comment.** Strava descriptions are usually public, and the workout `notes` and the Telegram comment can mention HRV, sleep or weight.
 - **`activity:write` is requested but optional.** Connections from before this change don't have it until `/reauth strava`. Without it the match is still recorded and Strava is left alone. The granted scope is read from `oauth_tokens.scope`.
@@ -539,3 +539,142 @@ Removing DRM is prohibited in the EU even for owned copies (InfoSoc Directive Ar
 - Open Intervals.icu bug on pool swims with `intensity=rest` (forum report of 2026-11-04, Forerunner 965, no fix yet): the watch adds about 1 m of distance per second of rest to the workout total, and may skip the last rest of a repeat. Nothing in the bot can fix that; check whether it shows up.
 
 **Revisit if:** Garmin opens its Training API to individuals, or Intervals.icu's workout syntax changes (the parse checks above are the fixture to re-run).
+
+---
+
+## ADR-021: Planned workouts are rows, with a status and a session type
+
+**Problem:** A confirmed week is one `training_plans.plan` jsonb blob. A plan change from today on overwrites the workouts, so nothing records what was planned first. The only link to what was done is a `strava_activity_id` inside the JSON. Nothing says skipped, partial or moved. A brick can hold only one of its two activities. The planner sees this week and next and nothing older, so it can't progress a session it gave three weeks ago or notice it's handing out the same session again. A completion rate would mean parsing every week's JSON in code.
+
+**Decision:**
+- **One row per planned session**, in a new table. `training_plans` keeps only the week-level fields (focus, phase, weekly targets, recap); its `plan` jsonb loses `workouts`.
+  ```
+  planned_workouts
+  ├── id: serial PK
+  ├── key: text UNIQUE             # upsert key (ADR-009): 'croton:<bookingKey>:<index>', 'tp:<externalId>'
+  ├── week_start: date             # no foreign key: TrainingPeaks rows have no week row
+  ├── date: date, start_time: text  # local
+  ├── sport: text                   # PLAN_SPORTS, without 'brick' (see bricks)
+  ├── session_type: text            # SESSION_TYPES, below
+  ├── title, intensity, targets, notes, field_test
+  ├── structure: jsonb, steps: jsonb null
+  ├── duration_minutes: integer     # the whole session, rest included: calendar block, scheduling
+  ├── active_minutes: integer       # without rest: compared with Strava moving time
+  ├── status: text                  # 'upcoming' | 'done' | 'partial' | 'unconfirmed' | 'skipped' | 'replaced'
+  ├── status_source: text null      # 'match' | 'athlete' | 'timeout' | 'plan_change' | 'backfill'
+  ├── activity_id: integer null → activities.id ON DELETE SET NULL
+  ├── brick_with: integer null → planned_workouts.id   # second leg → first leg
+  ├── replaced_by: integer null → planned_workouts.id
+  ├── calendar_event_id: text null
+  ├── source: text                  # 'plan' | 'trainingpeaks_import'
+  ├── main_set: jsonb null          # reserved for lap analysis, unused in v1
+  ├── created_at, updated_at
+  ```
+  A partial unique index on `activity_id` (where it isn't null) keeps one activity from fulfilling two sessions. Indexes on `date` and `(session_type, date)`.
+- **Two durations.** Strava's `moving_time` (our `duration_seconds`) leaves out wall rest in a pool and between strength sets, so a 60-minute swim with 12 minutes of rest records about 48. `duration_minutes` stays the whole session, because the calendar block has to fit it; `active_minutes` is what completion is measured against. For a swim with steps, code computes it from the non-rest steps and ignores the model's number. For strength and mobility, the model gives it (schema description). For run and bike it equals `duration_minutes` unless the steps have `rest` steps.
+- **Status rules (v1: duration only).**
+  - `upcoming` until the day has passed.
+  - A matched activity (`plan-match.ts`, unchanged rules) sets `done` at 80% or more of `active_minutes`, `partial` at 40–80%. Over 120% is still `done`; the dashboard marks it "longer than planned". Under 40% the matcher already treats the activity as a different session.
+  - A matched activity always wins: a late Strava upload overrides an athlete answer or a timeout. Deleting the activity sets the session back to `unconfirmed`.
+  - Whether the intensity matched isn't checked yet. It needs the main set from the laps (`main_set`, a later change). Until then, the athlete's **Partly** answer or a feedback note is how an interval session done easy becomes `partial`.
+- **Plan changes keep history.** When a confirmed change replaces a session from today on, the old row gets `status = 'replaced'`, `status_source = 'plan_change'` and `replaced_by` pointing to its successor (`src/training/plan-revisions.ts`): the same session type on the nearest day (a moved session), else the same day and sport (a swapped one), else none. A session dropped **on its own day** with no successor becomes `skipped` instead: changing the plan on the day doesn't hide a missed session. Sessions already `done` or `partial` are never replaced, and a new plan that repeats one of today's done sessions doesn't book it again. Replaced rows count for nothing, but the planner sees how often a weekday's sessions move.
+- **Bricks become two rows.** The plan schema drops `brick` as a sport for new plans: the model plans the bike and the run as two workouts with a `brick_*` session type, and the run leg sets `brick_with_previous: true`; code fills `brick_with`. Each leg matches its own activity, and both legs can now go to the watch (ADR-020). Stored plans with a `brick` workout are split by the backfill only when their steps or structure say how; otherwise they stay as one row with sport `brick`, which the matcher keeps treating as before.
+- **Completion rate.** Counted over `done`, `partial` and `skipped` sessions; `upcoming`, `unconfirmed` and `replaced` don't count. Sessions % = (done + ½ partial) / counted. Hours % uses the same weights on `active_minutes`. Activities that matched no session are **unplanned**: they count in load and in the weekly hours on the dashboard, never in the rate.
+- **Morning check-in at 08:00** (`node-cron`, `Europe/Ljubljana`): yesterday's sessions still `upcoming` become `unconfirmed`. If there are any, one message lists them, each with **Done / Partly / Skipped** buttons (`callback_data` `pw:<id>:<status>`, a direct write like ADR-018: no Claude call, no `pending_actions` row). No message when everything matched. The same job turns `unconfirmed` sessions older than 3 days into `skipped` (`status_source = 'timeout'`). The answer buttons redraw the message with a ✓, like the feedback buttons.
+- **The planner sees history.** Plan generation (and only plan generation: chat gets the 4-week rate line) gets, after the cache breakpoint (ADR-004):
+  - for each session type used in the last `PLANNER_HISTORY_WEEKS` (12) weeks, its last `PLANNER_HISTORY_PER_TYPE` (3) sessions, one line each: date, title, main set from `structure`, active minutes planned / done, status, RPE and feel. E.g. `run_threshold: 11-04 "4x8 min Z4" 50/48 min done, RPE 7 good`.
+  - the 4-week completion rates, and how many sessions per weekday were moved or skipped.
+  - an instruction in the static prompt: progress a session type from its last occurrence (one variable at a time: reps, duration, or target) rather than repeat it, and vary non-key sessions.
+  Roughly 1–2k tokens a planning call, a few cents a month. The two constants cap it.
+- **Telegram:** the Sunday recap gets one line (this week's sessions % and hours %, and the 4-week figures), and `/status` gets the 4-week rate. Both link to the dashboard (ADR-022).
+
+**Session types** (`SESSION_TYPES` in `src/training/session-types.ts`). Structured output enforces the enum; `planIssues()` checks that the type fits the sport (`run_*` for run and trail run, `brick_*` for brick legs, `race` and `field_test` for any sport, `field_test` exactly when `field_test` is set). The progress number is what the dashboard's session-type history shows (whole activity in v1).
+
+| Type | Sport | What it is | Progress shown |
+|---|---|---|---|
+| `run_recovery` | run | Short, Z1 | pace, HR |
+| `run_easy` | run | Aerobic Z2, may end with strides | pace at HR |
+| `run_long` | run | Long aerobic, Z1–Z2 | duration, pace at HR |
+| `run_long_quality` | run | Long run with tempo or race-pace segments | pace, HR |
+| `run_tempo` | run | Continuous Z3 / steady | pace at HR |
+| `run_threshold` | run | Threshold intervals, Z4 (cruise intervals) | pace, HR |
+| `run_vo2` | run | VO2max intervals, Z5, 2–5 min reps | pace, HR |
+| `run_speed` | run | Short fast reps or hill sprints, full recovery | pace |
+| `run_hills` | run | Hill repeats for strength-endurance | pace, HR |
+| `run_race_pace` | run | Goal race-pace work | pace at HR |
+| `bike_recovery` | bike | Spin, Z1 | power, HR |
+| `bike_endurance` | bike | Aerobic Z2 | power at HR |
+| `bike_long` | bike | Long Z2 ride | duration, power at HR |
+| `bike_tempo` | bike | Z3 blocks | power at HR |
+| `bike_sweet_spot` | bike | 88–94% FTP blocks | power, HR |
+| `bike_threshold` | bike | Z4 intervals around FTP | power, HR |
+| `bike_vo2` | bike | Z5, 2–6 min reps | power |
+| `bike_sprint` | bike | Short maximal efforts | power |
+| `bike_force` | bike | Low-cadence strength-endurance | power, cadence |
+| `bike_race_pace` | bike | Goal race-power work | power at HR |
+| `swim_technique` | swim | Drills, easy aerobic | pace / 100 m |
+| `swim_endurance` | swim | Longer aerobic sets | pace / 100 m |
+| `swim_css` | swim | Threshold sets at CSS | pace / 100 m |
+| `swim_speed` | swim | Short fast reps | pace / 100 m |
+| `swim_open_water` | swim | Open-water session | pace / 100 m |
+| `brick_aerobic` | bike + run legs | Aerobic bike, short run off the bike | run pace at HR |
+| `brick_race_pace` | bike + run legs | Race-pace bike and run | power, run pace |
+| `strength_full_body` | strength | General strength | RPE, feel |
+| `strength_lower` | strength | Legs and hips | RPE, feel |
+| `strength_upper_core` | strength | Upper body and core | RPE, feel |
+| `strength_power` | strength | Plyometrics, explosive work | RPE, feel |
+| `tennis` | tennis | Practice or match | RPE, duration |
+| `mobility` | mobility | Mobility, stretching, yoga | duration |
+| `field_test` | any | A protocol from `FIELD_TESTS` | the marker |
+| `race` | any | A race | result |
+| `other_run`, `other_bike`, `other_swim`, `other_strength`, `other` | that sport | Fallback when nothing above fits | — |
+
+A plan that uses a fallback type more than once a week is a sign the list is missing something. Adding a type is a code change and needs no migration.
+
+**Switching over (migration `0007`, one release):**
+1. Migration `0007` creates `planned_workouts` and copies every `training_plans` row into `training_plans_workouts_backup` (`week_start`, `plan`, `copied_at`).
+2. On boot, after the migrations, `moveLegacyPlanSessions` (`src/db/legacy-plans.ts`) turns each week that still has `plan.workouts` into rows and removes the array, one transaction per week, so a deploy never shows an empty week. The session type is `field_test` for tests and the sport's fallback otherwise; `strava_activity_id` becomes `activity_id` with the status from the rules above; past sessions without a match become `skipped` (`status_source = 'backfill'`); `active_minutes` is computed. Steps planned before step intensities were stored as `active`, so a timed, untargeted step labelled "Rest" becomes `rest` first (otherwise a pool swim's wall rest makes it `partial`), and a rest day the first plans wrote as an `other` session ("Rest - travel day") is left out. Weeks already moved are skipped. Tested on a Neon branch of production on 2026-11-17: 9 weeks, 55 sessions, the 26 Strava links kept, and a second run changed nothing.
+3. `npm run tp:import -- <workouts.csv> --planned` stores the TrainingPeaks planned workouts (`plannedHours` set) as rows with `source = 'trainingpeaks_import'` and key `tp:<externalIdFor>`. A completed one links to its imported activity, or to the Strava activity `withoutStravaDuplicates` kept instead. TrainingPeaks' planned duration becomes both durations (whether it includes rest is unknown). Planned-only rows in the past are `skipped`.
+4. `npm run workouts:classify` (`--dry-run` first) sends the rows that still have a fallback type to Haiku in batches of 40 (`session_classification` call type) and stores the type and intensity it gives, when the type fits the sport. Rows it can't place keep their fallback.
+5. `TrainingPlanStore` keeps `forWeek` (the week row plus its rows that aren't replaced), so the readers (`context.ts`, `feedback-questions.ts`, `marker-proposals.ts`, `tool-handlers.ts`, `/plan`, `/tomorrow`) didn't change. Booking writes through `applyWeek` (week row, new sessions and replacements in one `db.batch`), the linker through `setMatch`. Deleting an activity sets its session back to `unconfirmed`.
+6. Migration `0008`, one release later, drops the backup table.
+
+**Why not keep the JSON and add a reporting table?** Two copies of the same sessions would drift, and every status change (a match, a button, a timeout) would have to rewrite the whole week. Rows make each change one upsert.
+
+**Cost:** the Haiku backfill is a one-off of a few hundred rows, cents. The planner history is about 1–2k tokens per planning call. The check-in and the status rules use no Claude calls.
+
+**Revisit if:** the lap analysis lands (intensity in `partial`, `main_set` numbers in the planner history), or fallback types show up often.
+
+---
+
+## ADR-022: A read-only dashboard at a fixed URL, behind a Telegram login
+
+**Problem:** Planned vs done, the completion trend and how each session type has progressed don't fit in Telegram messages. The athlete wants a page at a fixed URL to review them. The repo is public and the data includes health values, so the page must be closed to everyone else, without adding a password to manage.
+
+**Decision:**
+- **Same service, same deploy:** Fastify serves `/dashboard` on Railway next to the webhooks. No frontend build, no JS framework: server-rendered HTML, mobile-first, light and dark through `prefers-color-scheme`, with charts drawn as inline SVG by TypeScript. Dashboard pages run no JavaScript, which keeps the content security policy simple.
+- **Read-only.** Every change still goes through the chat and its confirmation flow (ADR-007), so there's one way to write.
+- **Views:**
+  1. **Week** (`/dashboard`, `/dashboard/week/<monday>`): planned vs actual per day, coloured by status. Unplanned activities are greyed and count in the week's hours. A session opens its detail: planned structure and steps next to the activity's numbers, laps and feedback.
+  2. **Completion** (`/dashboard/completion`): sessions % and hours % per week over 12 weeks, with skipped and partial sessions listed.
+  3. **Session types** (`/dashboard/types`, `/dashboard/types/<type>`): each family's sessions over time with the progress number from ADR-021's table.
+- **Login with the Telegram Login Widget.** `/dashboard/login` shows the widget, which redirects to `/dashboard/auth` with the signed login data. The server checks the hash as Telegram documents it (HMAC-SHA256 of the sorted fields, keyed with SHA-256 of `TELEGRAM_BOT_TOKEN`), with a timing-safe compare (ADR-012), rejects an `auth_date` older than 5 minutes, and accepts only `id === TELEGRAM_AUTHORIZED_CHAT_ID` (in a private chat the chat ID is the user ID, ADR-006). Anything else gets the login page again and a log line, nothing more.
+  - Then a session cookie: `{ uid, exp }` signed with HMAC-SHA256 and `DASHBOARD_SESSION_SECRET` (new Railway variable, at least 32 bytes), 30 days, `HttpOnly`, `Secure`, `SameSite=Lax`, path `/dashboard`. Rotating the secret logs every session out. `/dashboard/logout` clears it.
+  - One-time setup: `/setdomain` in BotFather for the Railway domain, on the production bot.
+  - Every dashboard route except the login pages sits behind one Fastify `onRequest` hook. A test asks every registered dashboard route without a cookie and with a forged one and expects the login redirect, so a new route can't be left open by mistake.
+  - The `cookie` header is added to `REDACT_PATHS`.
+- **Headers:** `Cache-Control: no-store`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, a CSP that allows only `telegram.org` scripts and frames, and only on the login page, and `<meta name="robots" content="noindex">`.
+- **Local development:** the widget doesn't work on `localhost`. With `NODE_ENV=development` the server listens on `127.0.0.1` instead of `0.0.0.0`, and only then is `/dashboard/dev-login` registered, which sets the session cookie directly. A test checks the route doesn't exist in a production build.
+- **Code layout:** `src/dashboard/auth.ts` (Telegram hash check, session cookie), `routes.ts` (the hook and routes, reading through the stores), `views/*.ts` (HTML only), `charts.ts` (SVG). All data goes through `esc()`, which moves from `src/bot/html.ts` to `src/utils/html.ts` now that two outputs use it. The completion and progress numbers come from functions in `src/training/` that the recap and `/status` share, so the page and Telegram never disagree.
+- **Privacy page:** `/privacy` gets a paragraph saying the dashboard exists, signs in with Telegram, and shows the data only to the operator.
+
+**Why not:**
+- **A Telegram Mini App:** it solves login the same way but opens only inside Telegram, and the athlete wants a fixed URL in a browser.
+- **A password, or HTTP Basic Auth:** one more secret to keep, and Basic Auth has no logout and sends the credentials with every request.
+- **A secret token in the URL:** it ends up in browser history and request logs.
+- **A single-page app:** a second build and toolchain for three read-only views.
+- **Intervals.icu's calendar:** it shows planned vs done only for the watch sports, and knows nothing about our statuses or session types.
+
+**Cost:** no Claude calls and no new services. Page queries hit Neon like the bot does.
+
+**Revisit if:** the dashboard needs to write (then it needs CSRF protection and the confirmation flow), or someone besides the athlete needs access.

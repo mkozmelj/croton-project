@@ -1,5 +1,5 @@
-import type { WeekPlan, Workout, WorkoutInput } from "../training/plan.js";
-import { sortedWorkouts } from "../training/plan.js";
+import type { WeekPlan, Workout } from "../training/plan.js";
+import { activeMinutes, sortedWorkouts } from "../training/plan.js";
 
 // Plain-text renderings of plans, shared by the prompt context and Telegram (like
 // activity-format.ts). Plan text written by the model is data: it's rendered, not obeyed.
@@ -12,15 +12,21 @@ export const dayLabel = (isoDate: string) =>
     month: "short",
   }).format(new Date(`${isoDate}T00:00:00Z`));
 
-// One line, e.g. `Tue 29 Sep 07:00 run "Tempo intervals", 55 min, hard, targets 4:15 /km`.
-export function workoutLine(workout: WorkoutInput): string {
+// One line, e.g. `Tue 29 Sep 07:00 run "Tempo intervals" (run_threshold), 55 min, hard,
+// targets 4:15 /km, done`. A stored session's status shows once it's no longer upcoming.
+export function workoutLine(workout: Workout): string {
+  const active = activeMinutes(workout);
+  const brick = workout.brick_with_previous ? " brick run leg" : "";
   const parts = [
-    `${dayLabel(workout.date)} ${workout.start_time} ${workout.sport} ${JSON.stringify(workout.title)}`,
-    `${workout.duration_minutes} min`,
+    `${dayLabel(workout.date)} ${workout.start_time} ${workout.sport}${brick} ${JSON.stringify(workout.title)} (${workout.session_type})`,
+    active < workout.duration_minutes
+      ? `${workout.duration_minutes} min (${active} active)`
+      : `${workout.duration_minutes} min`,
     workout.intensity,
   ];
   if (workout.field_test) parts.push(`FIELD TEST ${workout.field_test}`);
   if (workout.targets) parts.push(`targets ${workout.targets}`);
+  if (workout.status && workout.status !== "upcoming") parts.push(workout.status);
   return parts.join(", ");
 }
 

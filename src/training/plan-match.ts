@@ -1,5 +1,5 @@
 import { localDate, localMidnight } from "../utils/dates.js";
-import type { Workout } from "./plan.js";
+import { activeMinutes, type Workout } from "./plan.js";
 
 // Which planned workout a synced activity fulfilled. Used for the feedback questions
 // (ADR-018) and to give the Strava activity the planned session's title and description.
@@ -17,7 +17,7 @@ const MIN_DURATION_SHARE = 0.4;
 const MAX_DURATION_SHARE = 2.5;
 
 export type MatchableActivity = {
-  externalId: string;
+  id: number;
   sport: string;
   startedAt: Date;
   durationSeconds: number;
@@ -38,14 +38,14 @@ export function matchPlannedWorkout<T extends Workout>(
 
   const scored = workouts.flatMap((workout) => {
     if (workout.date !== day || !sports.includes(workout.sport)) return [];
-    const linked = workout.strava_activity_id ?? null;
-    if (linked !== null && linked !== activity.externalId) return [];
+    const linked = workout.activity_id ?? null;
+    if (linked !== null && linked !== activity.id) return [];
     if (!plausibleDuration(workout, activity.durationSeconds)) return [];
     return [
       {
         workout,
         rank: [
-          linked === activity.externalId ? 0 : 1,
+          linked === activity.id ? 0 : 1,
           sports.indexOf(workout.sport),
           Math.abs(minuteOfDay(workout.start_time) - startMinute),
         ],
@@ -59,7 +59,8 @@ export function matchPlannedWorkout<T extends Workout>(
 function plausibleDuration(workout: Workout, durationSeconds: number): boolean {
   // A brick is one plan entry for two activities, so either part is shorter than planned.
   if (workout.sport === "brick" || workout.duration_minutes <= 0) return true;
-  const share = durationSeconds / 60 / workout.duration_minutes;
+  // Strava's moving time leaves out rest, so it's compared with the active minutes (ADR-021).
+  const share = durationSeconds / 60 / activeMinutes(workout);
   return share >= MIN_DURATION_SHARE && share <= MAX_DURATION_SHARE;
 }
 

@@ -9,6 +9,8 @@ function workout(overrides: Partial<Workout>): Workout {
     date: "2026-09-22",
     start_time: "07:00",
     sport: "run",
+    session_type: "run_threshold",
+    brick_with_previous: false,
     title: "Tempo",
     duration_minutes: 45,
     intensity: "hard",
@@ -23,7 +25,7 @@ function workout(overrides: Partial<Workout>): Workout {
 
 // Tue 22 Sep 2026, 07:00 in Ljubljana, 42:36 of moving time.
 const run = {
-  externalId: "111",
+  id: 111,
   sport: "run",
   startedAt: new Date("2026-09-22T05:00:00Z"),
   durationSeconds: 2556,
@@ -62,11 +64,23 @@ describe("matchPlannedWorkout", () => {
 
   it("skips a session another activity already fulfilled, but keeps its own", () => {
     const workouts = [
-      workout({ title: "Taken", strava_activity_id: "999" }),
+      workout({ title: "Taken", activity_id: 999 }),
       workout({ start_time: "18:00", title: "Free" }),
     ];
     expect(title(matchPlannedWorkout(run, workouts, TZ))).toBe("Free");
-    expect(title(matchPlannedWorkout({ ...run, externalId: "999" }, workouts, TZ))).toBe("Taken");
+    expect(title(matchPlannedWorkout({ ...run, id: 999 }, workouts, TZ))).toBe("Taken");
+  });
+
+  it("compares with the active minutes, so a swim's wall rest doesn't count against it", () => {
+    const swim = workout({
+      sport: "swim",
+      duration_minutes: 60,
+      active_minutes: 20,
+      title: "Swim",
+    });
+    // 15 minutes is under 40% of the whole hour, but 75% of the active time.
+    const short = { ...run, sport: "swim", durationSeconds: 15 * 60 };
+    expect(title(matchPlannedWorkout(short, [swim], TZ))).toBe("Swim");
   });
 
   it("ignores an activity far shorter or longer than planned, except for a brick", () => {

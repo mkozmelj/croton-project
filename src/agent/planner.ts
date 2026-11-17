@@ -8,7 +8,7 @@ import type { Logger } from "pino";
 import { z } from "zod";
 import type { ConversationStore } from "../db/conversations.js";
 import type { PendingActionStore } from "../db/pending-actions.js";
-import { planIssues, weekPlanSchema } from "../training/plan.js";
+import { weekPlanSchema, withoutInvalidWorkouts } from "../training/plan.js";
 import { addDays, localDate, weekStart } from "../utils/dates.js";
 import {
   type ApplyPlanPayload,
@@ -153,6 +153,7 @@ export function createPlanner(deps: PlannerDeps): Planner {
         `Plan the week Mon ${target} to Sun ${end}.${target <= today ? ` Only plan days from ${today} on; the week has already started.` : ""}`,
         "recap: the Telegram message. Open with any missing or stale fitness markers and the field test you scheduled for each. Then review last week (planned vs actual per sport, key sessions, intensity distribution), recovery (HRV, sleep, resting HR, ACWR, and the athlete's own session feedback: RPE and session RPE load, how sessions felt, any pain reported), and the plan's focus and reasoning (phase, load progression of at most 10%, whether a recovery week is due). Short paragraphs, each opening with a bold label (e.g. **Last week:**, **Recovery:**, **This week:**), no headings or tables, no session list (the plan is shown below it). 120-300 words.",
         "plan: every session of the week with start times that fit the athlete's availability and calendar, targets from the athlete's own zones (RPE where a sport has no anchor), field_test set on test sessions, B/C races handled per their priority. Rest days have no sessions.",
+        "session_type: each session's family. Progress a type from its most recent sessions (one variable at a time: reps, duration or target) instead of repeating it, and vary the sessions around the key ones. duration_minutes is the whole session for the calendar; active_minutes leaves out standing rest (wall rest in a swim, rest between strength sets). A brick is two sessions: the bike leg, then the run leg with brick_with_previous true, both with the same brick_* type.",
         "steps: the athlete starts run, bike and swim sessions from the watch, so give each one its steps, with every number taken from the athlete's zones (one metric per sport, the one its targets use). Leave target null where there's no anchor (RPE-only). Swims get a rest step after the warm-up, as the last step of every repeat, between sets and before the cool-down.",
         "The TRAINING PRINCIPLES normally suffice. Use search_literature only when a decision this week needs a source (e.g. taper length before a race); cite what you use in the recap.",
       ].join("\n");
@@ -179,14 +180,11 @@ export function createPlanner(deps: PlannerDeps): Planner {
       }
 
       const { recap, plan: generated } = parsed.data;
-      const plan = { ...generated, week_start: target };
       // Keep the usable sessions; tell the athlete about any that had to be dropped.
-      const dropped: string[] = [];
-      plan.workouts = plan.workouts.filter((w) => {
-        const issues = planIssues({ ...plan, workouts: [w] });
-        if (issues.length > 0) dropped.push(...issues);
-        return issues.length === 0 && w.date >= today;
-      });
+      const upcoming = { ...generated, week_start: target };
+      upcoming.workouts = upcoming.workouts.filter((w) => w.date >= today);
+      const { plan, dropped } = withoutInvalidWorkouts(upcoming);
+      const droppedCount = upcoming.workouts.length - plan.workouts.length;
       if (dropped.length > 0) log.warn({ dropped }, "dropped invalid planned sessions");
 
       await deps.conversations.append({
@@ -210,8 +208,8 @@ export function createPlanner(deps: PlannerDeps): Planner {
         expiresAt: new Date(instant.getTime() + CONFIRMATION_TTL_MS),
       });
       const note =
-        dropped.length > 0
-          ? `\n\n(${dropped.length} session(s) had invalid dates or times and were left out.)`
+        droppedCount > 0
+          ? `\n\n(${droppedCount} session(s) had invalid dates, times or session types and were left out.)`
           : "";
       return { text: `${recap}${note}`, proposals: [proposal] };
     },

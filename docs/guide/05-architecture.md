@@ -112,7 +112,8 @@ All tables are defined in [`src/db/schema.ts`](../../src/db/schema.ts). The migr
 | `activities` | Strava and TrainingPeaks activities, with `raw_data` |
 | `activity_feedback` | RPE, feel, pain and notes per activity ([ADR-018](../02-architecture-decisions.md#adr-018-post-activity-feedback-lives-in-its-own-table)) |
 | `health_metrics` | One row per day: sleep, HRV, resting HR, stress, weight, body fat, CTL, ATL, ramp rate |
-| `training_plans` | One row per week: the structured plan (`jsonb`) with calendar and Strava links |
+| `training_plans` | One row per week: the week's focus, phase and targets (`jsonb`) and the recap |
+| `planned_workouts` | One row per planned session: session type, durations (whole and active), status, the activity that fulfilled it, calendar event; replaced sessions stay as history (ADR-021) |
 | `pending_actions` | Proposals awaiting a tap, and open conversation modes, each with an expiry |
 | `conversations` | Every turn as full Anthropic content blocks (`jsonb`) |
 | `conversation_memories` | Monthly summaries of turns older than 60 days |
