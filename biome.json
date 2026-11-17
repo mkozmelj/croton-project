@@ -29,7 +29,7 @@
   },
   "overrides": [
     {
-      "includes": ["*.config.ts"],
+      "includes": ["*.config.ts", ".railway/railway.ts"],
       "linter": {
         "rules": {
           "style": {

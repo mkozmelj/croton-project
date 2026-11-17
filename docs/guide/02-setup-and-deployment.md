@@ -53,7 +53,15 @@ In development the bot uses **long polling**, so you don't need a public URL. Me
 
 ## 2. Deploy to Railway
 
-1. Create a Railway project from your GitHub fork. [`railway.json`](../../railway.json) already sets the build command, start command and health check.
+1. Create a Railway project from your GitHub fork. The service settings (build command, start command, health check, restart policy) live in [`.railway/railway.ts`](../../.railway/railway.ts), Railway's Infrastructure as Code file. Railway does **not** read it on deploy; you apply it once with the [Railway CLI](https://docs.railway.com/cli):
+
+   ```sh
+   railway link            # pick your project, environment and service
+   railway config plan     # preview what changes
+   railway config apply
+   ```
+
+   First change the project name (`"joyful-beauty"`), the service name and the GitHub repo in that file to yours. Variables are deliberately unmanaged there, so `apply` never touches them. Re-run `plan`/`apply` whenever you edit the file.
 2. Generate a public domain under **Settings → Networking**.
 3. Under **Variables**, add at least:
 

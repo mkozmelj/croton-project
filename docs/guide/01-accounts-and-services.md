@@ -51,7 +51,7 @@ The app uses Neon's serverless HTTP driver (`@neondatabase/serverless`), so anot
 Croton has to be always on and reachable over HTTPS: Telegram and Strava push webhooks to it, and the scheduler runs inside the process.
 
 1. Create an account at [railway.com](https://railway.com) and connect your GitHub.
-2. Create a project from your fork. Railway reads [`railway.json`](../../railway.json): it builds with `npm run build`, starts with `npm start`, and health-checks `/health`.
+2. Create a project from your fork. [`.railway/railway.ts`](../../.railway/railway.ts) sets it to build with `npm run build`, start with `npm start`, and health-check `/health`. You apply that file with `railway config apply` (see [Setup and deployment](02-setup-and-deployment.md#2-deploy-to-railway)).
 3. Under the service's **Settings → Networking**, generate a public domain. `https://<that domain>` is `APP_URL`.
 
 The Hobby plan (~$5/month) is enough. Any other host works if it can run a long-lived Node 24 process with a public HTTPS URL, such as Fly.io, Render, or a VPS behind a reverse proxy. It must run **a single instance**, because the scheduler is in-process.
