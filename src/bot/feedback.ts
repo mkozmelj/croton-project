@@ -11,7 +11,8 @@ import type {
 } from "../db/activity-feedback.js";
 import type { PendingActionStore } from "../db/pending-actions.js";
 import { ACTIVITY_FEELS } from "../db/schema.js";
-import { bold, esc, italic, sportEmoji } from "./html.js";
+import { esc } from "../utils/html.js";
+import { bold, italic, sportEmoji } from "./html.js";
 
 // ADR-018: one-tap questions after a new activity. A tap writes straight to
 // activity_feedback (no model call) and redraws the message with the answers so far.

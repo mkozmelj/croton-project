@@ -36,8 +36,9 @@ import {
 import { weeksAndDaysUntil } from "../training/phase.js";
 import { sortedWorkouts, type WeekPlan } from "../training/plan.js";
 import { listZoneSets, zoneSetParts } from "../training/zones.js";
+import { esc } from "../utils/html.js";
 import type { ImportSummary } from "./commands.js";
-import { bold, code, esc, italic, link, progressBar, quote, section, sportEmoji } from "./html.js";
+import { bold, code, italic, link, progressBar, quote, section, sportEmoji } from "./html.js";
 import { markdownToHtml } from "./markdown.js";
 import { planHtml, workoutHtml } from "./plan-html.js";
 

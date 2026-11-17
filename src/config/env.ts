@@ -65,6 +65,9 @@ const envSchema = z
       .regex(/^i?\d+$/, "the athlete id from Intervals.icu settings, e.g. i12345")
       .optional(),
     OPENAI_API_KEY: optionalSecret,
+    // ADR-022: signs the dashboard session cookie (openssl rand -hex 32). Without it the
+    // dashboard is off. Rotating it logs every session out.
+    DASHBOARD_SESSION_SECRET: z.string().min(32, "at least 32 characters").optional(),
   })
   .superRefine((value, ctx) => {
     // Production runs the Telegram webhook (ADR-012), which needs a public URL and a secret.

@@ -5,6 +5,9 @@ export const REDACT_PATHS = [
   "req.headers.authorization",
   'req.headers["x-api-key"]',
   'req.headers["x-telegram-bot-api-secret-token"]',
+  // ADR-022: the dashboard session cookie.
+  "req.headers.cookie",
+  'res.headers["set-cookie"]',
   "*.access_token",
   "*.refresh_token",
   "*.accessToken",

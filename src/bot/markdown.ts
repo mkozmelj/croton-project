@@ -1,4 +1,4 @@
-import { esc } from "./html.js";
+import { esc } from "../utils/html.js";
 
 // The model writes light Markdown (system prompt); Telegram gets HTML (ADR-017). Everything is
 // escaped first, and each rule inserts a complete tag pair within one line, so the output is

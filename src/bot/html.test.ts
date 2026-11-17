@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { esc, link, progressBar, splitMessage, stripHtml } from "./html.js";
+import { esc } from "../utils/html.js";
+import { link, progressBar, splitMessage, stripHtml } from "./html.js";
 
 describe("esc", () => {
   it("escapes the three characters Telegram HTML reserves", () => {

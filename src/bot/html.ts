@@ -1,19 +1,17 @@
+import { esc, escAttr } from "../utils/html.js";
+
 // Telegram HTML (ADR-017): every text the bot sends is parsed with parse_mode "HTML", so any
 // text that isn't markup goes through esc(). The inline helpers take plain text and escape it;
 // quote() and section() take HTML that's already built.
 
 export const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
 
-export function esc(text: string): string {
-  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
-
 export const bold = (text: string) => `<b>${esc(text)}</b>`;
 export const italic = (text: string) => `<i>${esc(text)}</i>`;
 export const code = (text: string) => `<code>${esc(text)}</code>`;
 
 export function link(text: string, url: string): string {
-  return `<a href="${esc(url).replaceAll('"', "&quot;")}">${esc(text)}</a>`;
+  return `<a href="${escAttr(url)}">${esc(text)}</a>`;
 }
 
 // An expandable quote shows its first lines and opens on tap: for detail that would bury the

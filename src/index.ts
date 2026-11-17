@@ -39,6 +39,7 @@ import { createNotifier } from "./bot/notifier.js";
 import { type BotTransport, configureBot, startBot } from "./bot/setup.js";
 import { registerTelegramWebhook } from "./bot/webhook.js";
 import { env } from "./config/env.js";
+import { registerDashboard } from "./dashboard/routes.js";
 import { createActivityStore } from "./db/activities.js";
 import { createActivityFeedbackStore } from "./db/activity-feedback.js";
 import { createAthleteProfileStore } from "./db/athlete-profile.js";
@@ -54,6 +55,7 @@ import { createUsageStore } from "./db/llm-usage.js";
 import { createOAuthStateStore } from "./db/oauth-states.js";
 import { createOAuthTokenStore, type OAuthProvider } from "./db/oauth-tokens.js";
 import { createPendingActionStore } from "./db/pending-actions.js";
+import { createPlannedWorkoutStore } from "./db/planned-workouts.js";
 import { createTrainingPlanStore } from "./db/training-plans.js";
 import {
   GOOGLE_AUTH_CALLBACK_PATH,
@@ -109,6 +111,7 @@ const logger = createLogger({
       env.INTERVALS_API_KEY,
       env.INTERVALS_API_KEY && intervalsBasicCredentials(env.INTERVALS_API_KEY),
       env.OPENAI_API_KEY,
+      env.DASHBOARD_SESSION_SECRET,
     ].filter((secret) => secret !== undefined),
   ],
 });
@@ -197,6 +200,30 @@ const app = buildServer({
 registerInfoPages(app);
 if (transport.mode === "webhook") {
   registerTelegramWebhook(app, { bot, secretToken: transport.secretToken });
+}
+
+// ADR-022: the read-only dashboard, behind a Telegram login.
+if (env.DASHBOARD_SESSION_SECRET) {
+  let botUsername: string | undefined;
+  registerDashboard(app, {
+    planned: createPlannedWorkoutStore(db),
+    plans,
+    activities,
+    botToken: env.TELEGRAM_BOT_TOKEN,
+    botUsername: async () => {
+      botUsername ??= (await bot.api.getMe()).username;
+      return botUsername;
+    },
+    authorizedUserId: chatId,
+    sessionSecret: env.DASHBOARD_SESSION_SECRET,
+    publicUrl,
+    timeZone: env.TIMEZONE,
+    // Local development runs on plain http (Safari drops Secure cookies there).
+    secureCookie: env.NODE_ENV !== "development",
+    devLogin: env.NODE_ENV === "development",
+  });
+} else {
+  logger.info({ module: "dashboard" }, "dashboard disabled (DASHBOARD_SESSION_SECRET unset)");
 }
 
 const connect: Partial<Record<OAuthProvider, ConnectDeps>> = {};
@@ -522,7 +549,11 @@ try {
   await literature.load().catch((error: unknown) => {
     logger.error({ err: error, module: "literature" }, "literature index load failed");
   });
-  await app.listen({ port: env.PORT, host: "0.0.0.0" });
+  // ADR-022: local development listens on loopback only, since it offers the dev login.
+  await app.listen({
+    port: env.PORT,
+    host: env.NODE_ENV === "development" ? "127.0.0.1" : "0.0.0.0",
+  });
   await startBot(bot, { transport, authorizedChatId: env.TELEGRAM_AUTHORIZED_CHAT_ID, logger });
   // After migrations: jobs write to the DB, and runOnStart jobs fire immediately.
   scheduler = startScheduler({

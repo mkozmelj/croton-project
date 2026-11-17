@@ -9,8 +9,9 @@ import { GoogleCalendarError } from "../integrations/google/calendar.js";
 import { GoogleAuthError } from "../integrations/google/oauth.js";
 import { IntervalsApiError } from "../integrations/intervals/client.js";
 import { TokenRefreshError } from "../integrations/token-refresh.js";
+import { esc } from "../utils/html.js";
 import { actionResultText, budgetRefusalText, failureText, modelText } from "./formatting.js";
-import { esc, splitMessage } from "./html.js";
+import { splitMessage } from "./html.js";
 import { proposalHtml } from "./proposal-html.js";
 
 // Telegram clears the "typing…" indicator after ~5 s; refresh it while Claude works.

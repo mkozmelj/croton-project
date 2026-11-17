@@ -28,6 +28,8 @@ const PRIVACY = page(
 <p>OAuth tokens are stored encrypted (AES-256-GCM) in the app's database and used only for the actions above. Access can be revoked at any time in the Google Account settings under Security → Third-party access.</p>
 <h2>Other data</h2>
 <p>Training data from Strava and Intervals.icu and the Telegram conversation are stored only to coach the operator and are not sold or shared.</p>
+<h2>Dashboard</h2>
+<p>A read-only training dashboard at <code>/dashboard</code> shows the operator's planned and completed sessions. Signing in uses Telegram Login; only the operator's Telegram account is accepted, and a signed session cookie keeps them signed in for 30 days. No one else can see the data.</p>
 <p>Use of information received from Google APIs adheres to the Google API Services User Data Policy, including the Limited Use requirements.</p>`,
 );
 

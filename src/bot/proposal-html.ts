@@ -7,7 +7,8 @@ import {
 import { formatDuration } from "../agent/activity-format.js";
 import type { PendingActionRow } from "../db/pending-actions.js";
 import { describeSource, formatMarkerValue, type Marker } from "../training/markers.js";
-import { bold, esc, sportEmoji } from "./html.js";
+import { esc } from "../utils/html.js";
+import { bold, sportEmoji } from "./html.js";
 import { planHtml } from "./plan-html.js";
 
 // What the athlete confirms, as Telegram HTML (ADR-017): rendered by code from the payload,

@@ -2,7 +2,8 @@ import { dayLabel } from "../agent/plan-format.js";
 import type { FieldTest, WeekPlan, Workout, WorkoutInput } from "../training/plan.js";
 import { sortedWorkouts } from "../training/plan.js";
 import { addDays } from "../utils/dates.js";
-import { bold, esc, intensityEmoji, italic, quote, sportEmoji } from "./html.js";
+import { esc } from "../utils/html.js";
+import { bold, intensityEmoji, italic, quote, sportEmoji } from "./html.js";
 
 // Telegram renderings of plans (ADR-017). The plain ones in agent/plan-format.ts stay for the
 // prompt context and stored conversations. Titles, targets and notes are model-written: they

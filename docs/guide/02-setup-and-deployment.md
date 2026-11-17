@@ -157,6 +157,16 @@ Supported inputs are text PDFs, which need `pdftotext` from poppler (`brew insta
 
 Only ingest material you have the right to use. [Customizing](04-customizing.md#literature-corpus) explains what's fine and what isn't.
 
+## 10. Optional: the dashboard
+
+A read-only page at `https://<your domain>/dashboard` shows each week planned against done, the completion rate over 12 weeks, and how each session type has progressed. It signs in with your Telegram account ([ADR-022](../02-architecture-decisions.md#adr-022-a-read-only-dashboard-at-a-fixed-url-behind-a-telegram-login)).
+
+1. Set `DASHBOARD_SESSION_SECRET` on Railway to `openssl rand -hex 32`. Changing it later signs every browser out.
+2. In BotFather, send `/setdomain`, pick the **production** bot, and enter your domain (without `https://`). The Telegram login button only works on that domain.
+3. Open `/dashboard`, tap **Log in with Telegram** and confirm in Telegram. Only the account behind `TELEGRAM_AUTHORIZED_CHAT_ID` gets in; you stay signed in for 30 days.
+
+Locally, the login button doesn't work on `localhost`. With `NODE_ENV=development` and the secret in `.env`, open `http://127.0.0.1:3000/dashboard/dev-login` instead.
+
 ---
 
 ## Environment variable reference
@@ -184,6 +194,7 @@ Everything is validated at startup by `src/config/env.ts`. A missing or malforme
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | for Calendar | | Web-application OAuth client |
 | `INTERVALS_API_KEY` / `INTERVALS_ATHLETE_ID` | for wellness, thresholds and watch workouts | | Intervals.icu → Settings → Developer Settings |
 | `OPENAI_API_KEY` | for literature search | | Embeddings only |
+| `DASHBOARD_SESSION_SECRET` | for the dashboard | | At least 32 characters; signs the dashboard's session cookie |
 
 ## Updating
 

@@ -6,7 +6,7 @@ A map of the code, for when you want to change something and need to know where 
 
 One Node.js process does everything:
 
-- a **Fastify** HTTP server (Telegram webhook, Strava webhook, OAuth routes, `/health`, two static pages);
+- a **Fastify** HTTP server (Telegram webhook, Strava webhook, OAuth routes, `/health`, two static pages, and the read-only `/dashboard`);
 - a **grammY** bot, wired into that server in production and long polling in development;
 - an in-process **scheduler** (`node-cron`) for the recap, the syncs, and the memory job;
 - a **background task runner** for work that must not block a webhook response.
@@ -50,7 +50,9 @@ src/
 │                       system prompt, context builder, tools and handlers, planner,
 │                       activity summary, memory, proposals and their executor
 ├── training/           Pure sports-science code: zones, VDOT, phases, plan matching,
-│                       field tests, breakthroughs, body composition
+│                       field tests, breakthroughs, body composition, completion rate, progress numbers
+├── dashboard/          Read-only web dashboard (ADR-022): Telegram login and session cookie (auth.ts),
+│                       routes behind one auth hook, page models, HTML views, inline SVG charts
 ├── integrations/
 │   ├── strava/         OAuth, REST client, webhook, activity sync, history import, mapper
 │   ├── google/         OAuth, Calendar REST client, plan → events
@@ -95,6 +97,10 @@ docs/                   Guides (this folder) and design records
 1. Strava POSTs an event. The app checks `subscription_id` and `owner_id`, answers `200` immediately, and hands the event to a background task ([ADR-012](../02-architecture-decisions.md#adr-012-every-inbound-webhook-is-authenticated-before-it-is-parsed)).
 2. The activity is **re-fetched from the Strava API**, because events aren't signed, and upserted by `external_id` only if it belongs to the connected athlete. Deletes and deauthorizations are confirmed with the API the same way before anything is removed.
 3. On `create` only: summary (numbers rendered by code, comment by Haiku), then threshold proposals (field test or breakthrough), then feedback questions, then the plan match and Strava rename. Each step is ordered so that a failure late in the chain can't hold back what you've already seen.
+
+### The dashboard
+
+`GET /dashboard` and its pages are server-rendered HTML with inline SVG charts and no JavaScript ([ADR-022](../02-architecture-decisions.md#adr-022-a-read-only-dashboard-at-a-fixed-url-behind-a-telegram-login)). `/dashboard/login` shows the Telegram Login Widget; `/dashboard/auth` checks Telegram's signature, the 5-minute `auth_date` window and the athlete's user ID, then sets a 30-day HMAC-signed cookie (`DASHBOARD_SESSION_SECRET`). One `onRequest` hook guards every other dashboard route, and a test asks each registered route without a valid cookie. Pages read through `db/planned-workouts.ts` (sessions joined with their activity and feedback); completion and progress numbers come from `training/completion.ts` and `training/progress.ts`. Locally (`NODE_ENV=development`) the server listens on `127.0.0.1` and `/dashboard/dev-login` signs in without Telegram.
 
 ### The weekly plan
 

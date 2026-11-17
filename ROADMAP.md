@@ -35,7 +35,8 @@ Phase 6 (post-activity feedback, planned titles on Strava, the hardened webhook)
 - [ ] `npm run workouts:classify -- --dry-run`, then without `--dry-run`, so the moved sessions get real session types.
 - [ ] Status rules, the 08:00 check-in, the completion rate in the Sunday recap and `/status`.
 - [ ] Session-type history in plan generation.
-- [ ] Dashboard: Telegram login (`/setdomain` in BotFather, `DASHBOARD_SESSION_SECRET` on Railway), week, completion and session-type views.
+- [x] Dashboard: Telegram login, week, completion and session-type views (`src/dashboard/`). Built, not yet deployed.
+- [ ] Dashboard setup: `DASHBOARD_SESSION_SECRET` on Railway (`openssl rand -hex 32`), `/setdomain` in BotFather for the Railway domain on the production bot, then sign in at `/dashboard`.
 - [ ] Next release: drop the plan backup table (migration `0008`).
 
 ## Ideas, not planned
