@@ -31,7 +31,8 @@ Phase 6 (post-activity feedback, planned titles on Strava, the hardened webhook)
 
 - [x] Review the `session_type` list in ADR-021.
 - [x] `planned_workouts` table, `active_minutes`, two-row bricks, plan changes as `replaced` rows (migration `0007`), stored plans moved to rows on boot. Built, not yet deployed.
-- [ ] After the deploy: `npm run tp:import -- <workouts.csv> --planned`, then `npm run workouts:classify -- --dry-run` and without `--dry-run`.
+- [x] Deployed 2026-11-17: production moved 9 weeks into 55 session rows.
+- [ ] `npm run workouts:classify -- --dry-run`, then without `--dry-run`, so the moved sessions get real session types.
 - [ ] Status rules, the 08:00 check-in, the completion rate in the Sunday recap and `/status`.
 - [ ] Session-type history in plan generation.
 - [ ] Dashboard: Telegram login (`/setdomain` in BotFather, `DASHBOARD_SESSION_SECRET` on Railway), week, completion and session-type views.

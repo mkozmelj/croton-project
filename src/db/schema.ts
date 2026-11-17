@@ -327,7 +327,8 @@ export const trainingPlans = pgTable("training_plans", {
   updatedAt: updatedAt(),
 });
 
-export const PLANNED_WORKOUT_SOURCES = ["plan", "trainingpeaks_import"] as const;
+// Only the planner writes sessions; the column leaves room for another source.
+export const PLANNED_WORKOUT_SOURCES = ["plan"] as const;
 
 // ADR-021: one row per planned session. Every write is an upsert on `key` (ADR-009). A plan
 // change keeps the old row as 'replaced'; only rows that aren't replaced make up the week.

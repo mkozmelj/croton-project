@@ -551,8 +551,8 @@ Removing DRM is prohibited in the EU even for owned copies (InfoSoc Directive Ar
   ```
   planned_workouts
   ├── id: serial PK
-  ├── key: text UNIQUE             # upsert key (ADR-009): 'croton:<bookingKey>:<index>', 'tp:<externalId>'
-  ├── week_start: date             # no foreign key: TrainingPeaks rows have no week row
+  ├── key: text UNIQUE             # upsert key (ADR-009): 'croton:<bookingKey>:<index>', 'legacy:<week>:<i>'
+  ├── week_start: date             # no foreign key to training_plans
   ├── date: date, start_time: text  # local
   ├── sport: text                   # PLAN_SPORTS, without 'brick' (see bricks)
   ├── session_type: text            # SESSION_TYPES, below
@@ -566,7 +566,7 @@ Removing DRM is prohibited in the EU even for owned copies (InfoSoc Directive Ar
   ├── brick_with: integer null → planned_workouts.id   # second leg → first leg
   ├── replaced_by: integer null → planned_workouts.id
   ├── calendar_event_id: text null
-  ├── source: text                  # 'plan' | 'trainingpeaks_import'
+  ├── source: text                  # 'plan' (room for another source later)
   ├── main_set: jsonb null          # reserved for lap analysis, unused in v1
   ├── created_at, updated_at
   ```
@@ -634,14 +634,14 @@ A plan that uses a fallback type more than once a week is a sign the list is mis
 **Switching over (migration `0007`, one release):**
 1. Migration `0007` creates `planned_workouts` and copies every `training_plans` row into `training_plans_workouts_backup` (`week_start`, `plan`, `copied_at`).
 2. On boot, after the migrations, `moveLegacyPlanSessions` (`src/db/legacy-plans.ts`) turns each week that still has `plan.workouts` into rows and removes the array, one transaction per week, so a deploy never shows an empty week. The session type is `field_test` for tests and the sport's fallback otherwise; `strava_activity_id` becomes `activity_id` with the status from the rules above; past sessions without a match become `skipped` (`status_source = 'backfill'`); `active_minutes` is computed. Steps planned before step intensities were stored as `active`, so a timed, untargeted step labelled "Rest" becomes `rest` first (otherwise a pool swim's wall rest makes it `partial`), and a rest day the first plans wrote as an `other` session ("Rest - travel day") is left out. Weeks already moved are skipped. Tested on a Neon branch of production on 2026-11-17: 9 weeks, 55 sessions, the 26 Strava links kept, and a second run changed nothing.
-3. `npm run tp:import -- <workouts.csv> --planned` stores the TrainingPeaks planned workouts (`plannedHours` set) as rows with `source = 'trainingpeaks_import'` and key `tp:<externalIdFor>`. A completed one links to its imported activity, or to the Strava activity `withoutStravaDuplicates` kept instead. TrainingPeaks' planned duration becomes both durations (whether it includes rest is unknown). Planned-only rows in the past are `skipped`.
+3. The TrainingPeaks 2024 planned workouts are **not** imported as sessions (decided 2026-11-17): the athlete doesn't want 2024 in the dashboard, so session history starts with the first Croton plan (week of 2026-09-21). The 2024 activities imported in Phase 4 stay in `activities`.
 4. `npm run workouts:classify` (`--dry-run` first) sends the rows that still have a fallback type to Haiku in batches of 40 (`session_classification` call type) and stores the type and intensity it gives, when the type fits the sport. Rows it can't place keep their fallback.
 5. `TrainingPlanStore` keeps `forWeek` (the week row plus its rows that aren't replaced), so the readers (`context.ts`, `feedback-questions.ts`, `marker-proposals.ts`, `tool-handlers.ts`, `/plan`, `/tomorrow`) didn't change. Booking writes through `applyWeek` (week row, new sessions and replacements in one `db.batch`), the linker through `setMatch`. Deleting an activity sets its session back to `unconfirmed`.
 6. Migration `0008`, one release later, drops the backup table.
 
 **Why not keep the JSON and add a reporting table?** Two copies of the same sessions would drift, and every status change (a match, a button, a timeout) would have to rewrite the whole week. Rows make each change one upsert.
 
-**Cost:** the Haiku backfill is a one-off of a few hundred rows, cents. The planner history is about 1–2k tokens per planning call. The check-in and the status rules use no Claude calls.
+**Cost:** the Haiku backfill is a one-off of about 50 rows, under a cent. The planner history is about 1–2k tokens per planning call. The check-in and the status rules use no Claude calls.
 
 **Revisit if:** the lap analysis lands (intensity in `partial`, `main_set` numbers in the planner history), or fallback types show up often.
 

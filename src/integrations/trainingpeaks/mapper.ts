@@ -1,7 +1,5 @@
 import { createHash } from "node:crypto";
 import type { ActivitySummary, NewActivity } from "../../db/activities.js";
-import { STORED_SPORTS, type StoredSport, type Workout } from "../../training/plan.js";
-import { fallbackSessionType } from "../../training/session-types.js";
 import { addDays, localDate, localMidnight, weekStart } from "../../utils/dates.js";
 import type { TpWorkout } from "./workouts.js";
 
@@ -99,85 +97,26 @@ export function activitiesFromWorkouts(workouts: readonly TpWorkout[], timeZone:
 // treated as the same session, and the Strava record (with laps and exact times) wins.
 const DUPLICATE_DURATION_TOLERANCE = 0.2;
 
-type Existing = Pick<ActivitySummary, "source" | "sport" | "startedAt" | "durationSeconds">;
-
-// The Strava activity a TrainingPeaks row duplicates, if any.
-export function stravaTwin<T extends Existing>(
-  row: Pick<NewActivity, "sport" | "startedAt" | "durationSeconds">,
-  existing: readonly T[],
-  timeZone: string,
-): T | undefined {
-  const day = localDate(row.startedAt, timeZone);
-  return existing.find(
-    (a) =>
-      a.source === "strava" &&
-      a.sport === row.sport &&
-      localDate(a.startedAt, timeZone) === day &&
-      Math.abs(a.durationSeconds - row.durationSeconds) <=
-        DUPLICATE_DURATION_TOLERANCE * Math.max(a.durationSeconds, row.durationSeconds),
-  );
-}
-
 export function withoutStravaDuplicates(
   rows: readonly NewActivity[],
-  existing: readonly Existing[],
+  existing: readonly Pick<ActivitySummary, "source" | "sport" | "startedAt" | "durationSeconds">[],
   timeZone: string,
 ): { kept: NewActivity[]; skipped: NewActivity[] } {
+  const strava = existing.filter((a) => a.source === "strava");
   const kept: NewActivity[] = [];
   const skipped: NewActivity[] = [];
-  for (const row of rows) (stravaTwin(row, existing, timeZone) ? skipped : kept).push(row);
-  return { kept, skipped };
-}
-
-// ADR-021 backfill: every TrainingPeaks workout with a planned duration becomes a planned
-// session. A completed one carries the external id its activity was imported under, so it can
-// be linked. The session type is a fallback until `npm run workouts:classify` sets it.
-export type TpPlannedSession = {
-  key: string;
-  workout: Workout;
-  activityExternalId: string | null;
-};
-
-const SESSION_SPORTS: ReadonlySet<string> = new Set(STORED_SPORTS);
-
-export function plannedSessionsFromWorkouts(workouts: readonly TpWorkout[]): TpPlannedSession[] {
-  const completedSeen = new Map<string, number>();
-  const plannedSeen = new Map<string, number>();
-  const sessions: TpPlannedSession[] = [];
-  for (const w of workouts) {
-    const base = [w.day, w.type, w.title, w.hours].join("|");
-    const seen = isCompleted(w) ? completedSeen : plannedSeen;
-    const occurrence = seen.get(base) ?? 0;
-    seen.set(base, occurrence + 1);
-    if (isDayOff(w) || !w.plannedHours || w.plannedHours <= 0) continue;
-    const externalId = externalIdFor(w, occurrence);
-    const mapped = sportFromTrainingPeaks(w.type, w.title);
-    const sport = (SESSION_SPORTS.has(mapped) ? mapped : "other") as StoredSport;
-    const minutes = Math.max(1, Math.round(w.plannedHours * 60));
-    const description = (w.description ?? w.title ?? "Planned session").replace(/\s+/g, " ");
-    sessions.push({
-      key: `tp:${externalId}`,
-      activityExternalId: isCompleted(w) ? externalId : null,
-      workout: {
-        date: w.day,
-        start_time: "12:00",
-        sport,
-        session_type: fallbackSessionType(sport),
-        title: w.title ?? w.type ?? "Workout",
-        // Whether TrainingPeaks' planned duration includes rest is unknown: both are the same.
-        duration_minutes: minutes,
-        active_minutes: minutes,
-        brick_with_previous: false,
-        intensity: "easy",
-        structure: [{ segment: "main", description }],
-        steps: null,
-        targets: null,
-        field_test: null,
-        notes: w.coachComments,
-      },
-    });
+  for (const row of rows) {
+    const day = localDate(row.startedAt, timeZone);
+    const duplicate = strava.some(
+      (a) =>
+        a.sport === row.sport &&
+        localDate(a.startedAt, timeZone) === day &&
+        Math.abs(a.durationSeconds - row.durationSeconds) <=
+          DUPLICATE_DURATION_TOLERANCE * Math.max(a.durationSeconds, row.durationSeconds),
+    );
+    (duplicate ? skipped : kept).push(row);
   }
-  return sessions;
+  return { kept, skipped };
 }
 
 const clock = (hours: number) => {

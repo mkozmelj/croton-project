@@ -4,7 +4,6 @@ import {
   activitiesFromWorkouts,
   externalIdFor,
   planMarkdown,
-  plannedSessionsFromWorkouts,
   sportFromTrainingPeaks,
   withoutStravaDuplicates,
 } from "./mapper.js";
@@ -79,31 +78,6 @@ describe("activitiesFromWorkouts", () => {
     const [w] = parseWorkoutsCsv(csv).workouts;
     if (!w) throw new Error("no workout");
     expect(externalIdFor(w, 0)).not.toBe(externalIdFor(w, 1));
-  });
-});
-
-describe("plannedSessionsFromWorkouts", () => {
-  it("stores every planned workout, completed ones under their activity's id", () => {
-    const { workouts } = parseWorkoutsCsv(csv);
-    const sessions = plannedSessionsFromWorkouts(workouts);
-    const activities = activitiesFromWorkouts(workouts, "Europe/Ljubljana");
-    expect(
-      sessions.map((s) => [s.workout.title, s.workout.sport, s.workout.duration_minutes]),
-    ).toEqual([
-      ["Long ride", "bike", 180],
-      ["Brick", "run", 15],
-      ["Tempo run", "run", 60],
-    ]);
-    expect(sessions.map((s) => s.activityExternalId)).toEqual([
-      activities[0]?.externalId,
-      activities[1]?.externalId,
-      null,
-    ]);
-    expect(sessions[0]?.workout).toMatchObject({
-      session_type: "other_bike",
-      structure: [{ segment: "main", description: "Z2 steady, 3h fuel 60 g/h" }],
-    });
-    expect(new Set(sessions.map((s) => s.key)).size).toBe(3);
   });
 });
 

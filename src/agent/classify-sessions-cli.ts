@@ -1,6 +1,6 @@
 // ADR-021 backfill: gives stored sessions that only have a fallback type (planned before
-// session types existed, or imported from TrainingPeaks) a real session type and intensity,
-// one Haiku call per batch. Safe to repeat: a session the model can't place keeps its type.
+// session types existed) a real session type and intensity, one Haiku call per batch. Safe to
+// repeat: a session the model can't place keeps its type.
 //   npm run workouts:classify -- --dry-run
 //   npm run workouts:classify
 

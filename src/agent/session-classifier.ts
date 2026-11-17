@@ -13,8 +13,8 @@ import type { Claude } from "./claude.js";
 import { textOf } from "./history.js";
 
 // ADR-021 backfill: one Haiku call per batch of stored sessions that only have a fallback
-// type (sessions planned before session types, TrainingPeaks imports). Rows and titles are
-// data, not instructions.
+// type (sessions planned before session types existed). Rows and titles are data, not
+// instructions.
 
 // The types a backfilled row starts with. tennis and mobility are final as they are.
 export const FALLBACK_TYPES: readonly SessionType[] = [

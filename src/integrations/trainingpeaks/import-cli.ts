@@ -5,22 +5,17 @@
 //     --plan-notes data/literature/trainingpeaks-2024-plan.md
 // Completed workouts are upserted into `activities` (safe to repeat, ADR-009). --plan-notes also
 // writes the plan as weekly Markdown notes for `npm run ingest -- <file> --type notes`.
-// --planned also stores every planned workout as a planned_workouts row, linked to its activity
-// (ADR-021); `npm run workouts:classify` then gives them session types.
 import { readFile, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import { env } from "../../config/env.js";
 import { createActivityStore } from "../../db/activities.js";
 import { createDatabase } from "../../db/client.js";
-import { createBackfillStore } from "../../db/planned-workout-backfill.js";
-import { addDays, localDate, localMidnight } from "../../utils/dates.js";
+import { addDays, localMidnight } from "../../utils/dates.js";
 import {
   activitiesFromWorkouts,
   isCompleted,
   planMarkdown,
-  plannedSessionsFromWorkouts,
   sportFromTrainingPeaks,
-  stravaTwin,
   withoutStravaDuplicates,
 } from "./mapper.js";
 import { parseWorkoutsCsv } from "./workouts.js";
@@ -33,7 +28,6 @@ const { values, positionals } = parseArgs({
     "dry-run": { type: "boolean", default: false },
     "plan-notes": { type: "string" },
     title: { type: "string" },
-    planned: { type: "boolean", default: false },
   },
 });
 
@@ -42,7 +36,7 @@ const isDay = (value: string | undefined) =>
   value === undefined || /^\d{4}-\d{2}-\d{2}$/.test(value);
 if (!file || !isDay(values.from) || !isDay(values.to)) {
   console.error(
-    "usage: npm run tp:import -- <workouts.csv> [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--dry-run] [--plan-notes <out.md>] [--title <notes title>] [--planned]",
+    "usage: npm run tp:import -- <workouts.csv> [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--dry-run] [--plan-notes <out.md>] [--title <notes title>]",
   );
   process.exit(1);
 }
@@ -81,19 +75,12 @@ if (values["plan-notes"]) {
   );
 }
 
-const planned = values.planned ? plannedSessionsFromWorkouts(workouts) : [];
-if (values.planned) {
-  const linked = planned.filter((s) => s.activityExternalId !== null).length;
-  console.log(`${planned.length} planned sessions, ${linked} of them completed.`);
-}
-
 if (values["dry-run"]) {
   console.log("Dry run: nothing written to the database.");
   process.exit(0);
 }
 
-const db = createDatabase(env.DATABASE_URL);
-const store = createActivityStore(db);
+const store = createActivityStore(createDatabase(env.DATABASE_URL));
 const first = days[0];
 const last = days.at(-1);
 const existing =
@@ -116,26 +103,3 @@ for (const row of kept) {
 console.log(
   `${kept.length} activities upserted (${inserted} new, ${kept.length - inserted} updated), ${skipped.length} skipped as Strava duplicates.`,
 );
-
-if (values.planned) {
-  // A completed session links to its imported activity, or to the Strava activity that was
-  // kept instead of it.
-  const backfill = createBackfillStore(db);
-  const byExternalId = await backfill.activitiesByExternalId(
-    planned.flatMap((s) => (s.activityExternalId ? [s.activityExternalId] : [])),
-  );
-  const twins = new Map(
-    skipped.flatMap((row) => {
-      const twin = stravaTwin(row, existing, env.TIMEZONE);
-      return twin ? [[row.externalId, twin] as const] : [];
-    }),
-  );
-  const sessions = planned.map(({ key, workout, activityExternalId }) => {
-    const activity = activityExternalId
-      ? (byExternalId.get(activityExternalId) ?? twins.get(activityExternalId) ?? null)
-      : null;
-    return { key, workout, activity };
-  });
-  const added = await backfill.importSessions(sessions, localDate(new Date(), env.TIMEZONE));
-  console.log(`${added} planned sessions stored (${sessions.length - added} were already there).`);
-}
