@@ -30,12 +30,12 @@ Phase 6 (post-activity feedback, planned titles on Strava, the hardened webhook)
 [ADR-021](docs/02-architecture-decisions.md#adr-021-planned-workouts-are-rows-with-a-status-and-a-session-type) stores each planned session as a row with a status and a session type; [ADR-022](docs/02-architecture-decisions.md#adr-022-a-read-only-dashboard-at-a-fixed-url-behind-a-telegram-login) adds the dashboard.
 
 - [x] Review the `session_type` list in ADR-021.
-- [x] `planned_workouts` table, `active_minutes`, two-row bricks, plan changes as `replaced` rows (migration `0007`), stored plans moved to rows on boot. Built, not yet deployed.
+- [x] `planned_workouts` table, `active_minutes`, two-row bricks, plan changes as `replaced` rows (migration `0007`), stored plans moved to rows on boot.
 - [x] Deployed 2026-11-17: production moved 9 weeks into 55 session rows.
 - [ ] `npm run workouts:classify -- --dry-run`, then without `--dry-run`, so the moved sessions get real session types.
 - [ ] Status rules, the 08:00 check-in, the completion rate in the Sunday recap and `/status`.
 - [ ] Session-type history in plan generation.
-- [x] Dashboard: Telegram login, week, completion and session-type views (`src/dashboard/`). Built, not yet deployed.
+- [x] Dashboard: Telegram login, week, completion and session-type views (`src/dashboard/`). Deployed 2026-11-17.
 - [ ] Dashboard setup: `DASHBOARD_SESSION_SECRET` on Railway (`openssl rand -hex 32`), `/setdomain` in BotFather for the Railway domain on the production bot, then sign in at `/dashboard`.
 - [ ] Next release: drop the plan backup table (migration `0008`).
 
