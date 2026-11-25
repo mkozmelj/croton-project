@@ -3,6 +3,7 @@ import { Bot } from "grammy";
 import { createActionExecutor } from "./agent/action-executor.js";
 import { createActivitySummarizer } from "./agent/activity-summary.js";
 import { createCalendarContext } from "./agent/calendar-context.js";
+import { createCheckIn } from "./agent/check-in.js";
 import { createClaude } from "./agent/claude.js";
 import { createContextBuilder } from "./agent/context.js";
 import { createFeedbackRequester } from "./agent/feedback-questions.js";
@@ -13,7 +14,9 @@ import { createOrchestrator } from "./agent/orchestrator.js";
 import { createPlanBooking } from "./agent/plan-booking.js";
 import { createPlanLinker } from "./agent/plan-link.js";
 import { createPlanner } from "./agent/planner.js";
+import { loadCompletion } from "./agent/session-history.js";
 import { createToolHandlers } from "./agent/tool-handlers.js";
+import { checkInKeyboard, checkInText } from "./bot/check-in.js";
 import {
   type ConnectDeps,
   IMPORT_ACTIVITY_DAYS,
@@ -40,6 +43,7 @@ import { type BotTransport, configureBot, startBot } from "./bot/setup.js";
 import { registerTelegramWebhook } from "./bot/webhook.js";
 import { env } from "./config/env.js";
 import { registerDashboard } from "./dashboard/routes.js";
+import { DASHBOARD_PATH } from "./dashboard/views/format.js";
 import { createActivityStore } from "./db/activities.js";
 import { createActivityFeedbackStore } from "./db/activity-feedback.js";
 import { createAthleteProfileStore } from "./db/athlete-profile.js";
@@ -205,6 +209,9 @@ if (transport.mode === "webhook") {
 }
 
 // ADR-022: the read-only dashboard, behind a Telegram login.
+const dashboardUrl = env.DASHBOARD_SESSION_SECRET
+  ? new URL(DASHBOARD_PATH, publicUrl).toString()
+  : null;
 if (env.DASHBOARD_SESSION_SECRET) {
   let botUsername: string | undefined;
   registerDashboard(app, {
@@ -422,7 +429,26 @@ jobs.push({
   name: "sunday-recap",
   cron: "0 19 * * 0",
   run: async () => {
-    await notifier.notify(recapQuestionText((await planner.startRecap()).weekStart));
+    const [{ weekStart: target }, summary] = await Promise.all([
+      planner.startRecap(),
+      loadCompletion(planned, localDate(new Date(), env.TIMEZONE)),
+    ]);
+    await notifier.notify(recapQuestionText(target, { summary, dashboardUrl }));
+  },
+});
+
+// ADR-021 morning check-in, 08:00 local: past sessions no activity matched get Done / Partly /
+// Skipped buttons, and ones left unanswered for 3 days count as skipped.
+const checkIn = createCheckIn({ plans, timeZone: env.TIMEZONE });
+jobs.push({
+  name: "morning-check-in",
+  cron: "0 8 * * *",
+  run: async () => {
+    const { toAsk, expired } = await checkIn.run();
+    logger.info({ module: "check-in", asked: toAsk.length, expired }, "check-in done");
+    if (toAsk.length > 0) {
+      await notifier.notifyWithButtons(checkInText(toAsk), checkInKeyboard(toAsk));
+    }
   },
 });
 
@@ -503,6 +529,8 @@ configureBot(bot, {
   fitness,
   goals,
   plans,
+  sessions: planned,
+  dashboardUrl,
   pending,
   planner,
   onboarding: orchestrator,
@@ -512,6 +540,7 @@ configureBot(bot, {
     pending,
     timeZone: env.TIMEZONE,
   },
+  checkIn: { plans, sessions: planned, timeZone: env.TIMEZONE },
   importHistory,
   // /selftest: a background task that fails on purpose, to check the alert path end to end.
   runSelfTest: () =>

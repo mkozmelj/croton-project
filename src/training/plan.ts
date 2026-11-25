@@ -55,7 +55,7 @@ const stepFields = {
   label: z
     .string()
     .describe(
-      "Short cue shown on the watch, words only (no numbers), e.g. 'Warm-up', 'Drill', 'Tempo'",
+      "Short cue shown on the watch, words only (no numbers), at most 30 characters, e.g. 'Warm-up', 'Tempo'. A swim drill or aid step gets its name, e.g. 'Catch-up', 'Fingertip drag', 'Kick with fins', 'Pull buoy', never just 'Drill'",
     ),
   duration_seconds: z
     .number()
@@ -148,7 +148,11 @@ export const workoutSchema = z.object({
       "true only on the run leg of a brick, planned right after its bike leg (both legs get the same brick_* session_type)",
     ),
   intensity: z.enum(["recovery", "easy", "moderate", "hard", "race"]),
-  structure: z.array(segmentSchema),
+  structure: z
+    .array(segmentSchema)
+    .describe(
+      "Warm-up, main and cool-down. Swims: name every drill with its distance and rest, one technique cue and the equipment it needs, or 'no equipment' (e.g. '4x50 m catch-up, 15 s rest: touch hands in front before each stroke; no equipment'), never just 'drills'. Use only equipment the athlete's profile lists",
+    ),
   steps: stepsSchema,
   targets: z
     .string()

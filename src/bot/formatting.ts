@@ -27,6 +27,12 @@ import {
   weeklyBody,
 } from "../training/body.js";
 import {
+  COMPLETION_WEEKS,
+  type CompletionSummary,
+  type CompletionWindow,
+  formatRate,
+} from "../training/completion.js";
+import {
   describeAge,
   describeSource,
   formatMarkerValue,
@@ -197,6 +203,9 @@ export function activityText(
 
 type StatusSummary = {
   phase: string;
+  completion: CompletionSummary;
+  // The dashboard's URL, when it's enabled (ADR-022).
+  dashboardUrl: string | null;
   weekStart: string;
   weekTotals: SportTotals[];
   lastActivity: ActivitySummary | null;
@@ -234,6 +243,10 @@ export function statusText(status: StatusSummary): string {
   return [
     `📊 <b>Status</b>\n🗓️ Phase: ${esc(status.phase)}`,
     section(`This week <i>(since Mon ${status.weekStart})</i>`, week),
+    section(
+      "✅ Plan completion",
+      completionLines(status.completion, { week: false, dashboardUrl: status.dashboardUrl }),
+    ),
     recovery,
     section("⚙️ Connections", [
       `Strava: ${status.stravaConnected ? "✅ connected" : "❌ not connected (/connect)"}`,
@@ -315,9 +328,40 @@ export function jobRecoveredText(name: string): string {
   return `✅ ${jobName(name)} works again.`;
 }
 
-export function recapQuestionText(weekStart: string): string {
+// ADR-021: the completion rate, with the dashboard link. The recap shows this week too.
+export function completionLines(
+  summary: CompletionSummary,
+  options: { week: boolean; dashboardUrl: string | null },
+): string[] {
+  const lines = [
+    ...(options.week ? [`This week: ${rateText(summary.week)}`] : []),
+    `Last ${COMPLETION_WEEKS} weeks: ${rateText(summary.recent)}`,
+  ];
+  if (options.dashboardUrl) lines.push(link("Open the dashboard", options.dashboardUrl));
+  return lines;
+}
+
+function rateText(window: CompletionWindow): string {
+  const waiting = window.open > 0 ? ` · ${window.open} waiting for an answer` : "";
+  if (window.counted === 0) return `nothing counted yet${waiting}`;
+  return `${formatRate(window.sessionsRate)} of sessions, ${formatRate(window.hoursRate)} of hours <i>(${window.done} done, ${window.partial} partial, ${window.skipped} skipped${waiting})</i>`;
+}
+
+export function recapQuestionText(
+  weekStart: string,
+  completion?: { summary: CompletionSummary; dashboardUrl: string | null },
+): string {
   return [
     "📝 <b>Weekly recap time</b>",
+    ...(completion
+      ? [
+          completionLines(completion.summary, {
+            week: true,
+            dashboardUrl: completion.dashboardUrl,
+          }).join("\n"),
+          "",
+        ]
+      : []),
     `How did the week go? Any niggles, fatigue, illness, or things I should know about the week of Mon ${weekStart} (travel, busy days, a race)?`,
     "",
     "<i>Your next message is the feedback I'll plan from.</i>",
@@ -445,6 +489,8 @@ export function profileText({
   const availability = profile?.preferences?.availability;
   if (typeof availability === "string")
     backgroundLines.push(`• Availability: ${esc(availability)}`);
+  const equipment = profile?.preferences?.equipment;
+  if (typeof equipment === "string") backgroundLines.push(`• Equipment: ${esc(equipment)}`);
   if (profile?.injuryNotes) backgroundLines.push(`• Injuries: ${esc(profile.injuryNotes)}`);
 
   return [
@@ -473,6 +519,7 @@ export function profileEditHelpText(): string {
     ]),
     section("About you", [
       example("/profile availability Mon rest, Tue/Thu 6:30-7:45, long ride Sat"),
+      example("/profile equipment 25 m pool; pull buoy, fins, kickboard, no paddles"),
       example("/profile injuries none"),
       example("/profile name Alex"),
     ]),

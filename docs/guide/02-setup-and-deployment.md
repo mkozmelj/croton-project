@@ -144,7 +144,7 @@ With Intervals.icu configured, every confirmed plan also sends its run, bike and
 ## 8. Load history and onboard
 
 1. **`/import`** pulls 12 months of Strava activities and 90 days of wellness. It sends no notifications and is safe to repeat. Plan generation uses this history for its baseline: recent volume, biggest weeks, longest sessions.
-2. **`/onboard`** starts a short conversation about your background: years per sport, typical weekly hours, recent race results (VDOT is worked out from them), availability, and injuries. Each fact is shown with a Confirm button before it's saved.
+2. **`/onboard`** starts a short conversation about your background: years per sport, typical weekly hours, recent race results (VDOT is worked out from them), availability, equipment (pool length, swim aids, bike trainer), and injuries. Each fact is shown with a Confirm button before it's saved.
 3. **Set your goals in plain language**, for example: "My A race for 2027 is Ironman 70.3 Pula on 26 September, goal sub 4:45." Confirm the proposal. `/goals` lists your goals.
 4. **`/recap`** produces your first weekly plan. From Friday to Sunday it plans next week; from Monday to Thursday it re-plans the rest of this week.
 

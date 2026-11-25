@@ -3,6 +3,7 @@ import type { Logger } from "pino";
 import type { ActionExecutor } from "../agent/action-executor.js";
 import type { Orchestrator } from "../agent/orchestrator.js";
 import { authorizedChatOnly } from "./access-control.js";
+import { type CheckInHandlerDeps, registerCheckInHandlers } from "./check-in.js";
 import { COMMANDS, type CommandDeps, registerCommands } from "./commands.js";
 import { type FeedbackHandlerDeps, registerFeedbackHandlers } from "./feedback.js";
 import { errorBoundary, registerMessageHandlers } from "./handlers.js";
@@ -15,10 +16,12 @@ type BotDeps = CommandDeps & {
   orchestrator: Orchestrator;
   executor: ActionExecutor;
   activityFeedback: FeedbackHandlerDeps;
+  checkIn: CheckInHandlerDeps;
   logger: Logger;
 };
 
-// Messages, plus button taps: Confirm/Cancel (ADR-007) and activity feedback (ADR-018).
+// Messages, plus button taps: Confirm/Cancel (ADR-007), activity feedback (ADR-018) and the
+// morning check-in (ADR-021).
 const ALLOWED_UPDATES = ["message", "callback_query"] as const;
 
 // Middleware order matters: error boundary, then access control (ADR-006) before any handler.
@@ -28,6 +31,7 @@ export function configureBot(bot: Bot, deps: BotDeps): Bot {
   bot.use(authorizedChatOnly(deps.authorizedChatId, deps.logger));
   registerCommands(bot, deps);
   registerFeedbackHandlers(bot, deps.activityFeedback);
+  registerCheckInHandlers(bot, deps.checkIn);
   registerMessageHandlers(bot, deps);
   return bot;
 }

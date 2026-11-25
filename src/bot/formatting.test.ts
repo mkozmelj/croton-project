@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { IntervalsApiError } from "../integrations/intervals/client.js";
 import { storedActivity } from "../integrations/strava/test-fixtures.js";
+import { completionSummary } from "../training/completion.js";
 import type { WeekPlan, Workout } from "../training/plan.js";
 import {
   activityText,
   budgetText,
+  completionLines,
   goalsText,
   jobFailureText,
   planCommandText,
   profileEditErrorText,
+  recapQuestionText,
   startText,
   tomorrowText,
 } from "./formatting.js";
@@ -137,5 +140,36 @@ describe("plans", () => {
     expect(text).toContain("🧪 <b>Field test:</b> 30-min threshold run test");
     expect(text).toContain("<blockquote><b>Warm-up:</b>");
     expect(tomorrowText(week, "2026-09-30")).toBe("💤 Tomorrow (2026-09-30) is a rest day.");
+  });
+});
+
+describe("completion lines", () => {
+  const summary = completionSummary(
+    [
+      { date: "2026-11-24", status: "done", activeMinutes: 60 },
+      { date: "2026-11-26", status: "partial", activeMinutes: 40 },
+      { date: "2026-11-27", status: "unconfirmed", activeMinutes: 30 },
+      { date: "2026-11-10", status: "skipped", activeMinutes: 60 },
+    ],
+    "2026-11-29",
+  );
+
+  it("gives /status the 4-week rate and the dashboard link", () => {
+    expect(
+      completionLines(summary, { week: false, dashboardUrl: "https://example.test/dashboard" }),
+    ).toEqual([
+      "Last 4 weeks: 50% of sessions, 50% of hours <i>(1 done, 1 partial, 1 skipped · 1 waiting for an answer)</i>",
+      '<a href="https://example.test/dashboard">Open the dashboard</a>',
+    ]);
+  });
+
+  it("puts this week and the 4 weeks at the top of the recap question", () => {
+    const text = recapQuestionText("2026-11-30", { summary, dashboardUrl: null });
+    expect(text).toContain(
+      "This week: 75% of sessions, 80% of hours <i>(1 done, 1 partial, 0 skipped · 1 waiting for an answer)</i>",
+    );
+    expect(text).toContain("Last 4 weeks:");
+    expect(text).not.toContain("dashboard");
+    expect(recapQuestionText("2026-11-30")).not.toContain("This week:");
   });
 });

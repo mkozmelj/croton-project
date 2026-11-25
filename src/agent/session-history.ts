@@ -1,6 +1,12 @@
 import { z } from "zod";
-import type { SessionRecord } from "../db/planned-workouts.js";
-import { completion, formatRate } from "../training/completion.js";
+import type { PlannedWorkoutStore, SessionRecord } from "../db/planned-workouts.js";
+import {
+  COMPLETION_WEEKS,
+  type CompletionSummary,
+  completion,
+  completionSummary,
+  formatRate,
+} from "../training/completion.js";
 import { addDays } from "../utils/dates.js";
 
 // ADR-021 "The planner sees history": what plan generation gets of past sessions, so it can
@@ -10,8 +16,6 @@ import { addDays } from "../utils/dates.js";
 // The window and the per-type cap keep this at about 1-2k tokens.
 export const PLANNER_HISTORY_WEEKS = 12;
 export const PLANNER_HISTORY_PER_TYPE = 3;
-// The completion rate covers the same 4 weeks as the recap and /status.
-export const COMPLETION_WEEKS = 4;
 // A long main-set description is cut here.
 const MAIN_SET_CHARS = 140;
 
@@ -19,6 +23,22 @@ const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
 // Stored structure is jsonb; anything that doesn't parse just has no main set.
 const structureSchema = z.array(z.object({ segment: z.string(), description: z.string() }));
+
+// The Sunday recap's and /status's figures: this week and the last COMPLETION_WEEKS weeks.
+export async function loadCompletion(
+  sessions: Pick<PlannedWorkoutStore, "between">,
+  today: string,
+): Promise<CompletionSummary> {
+  const records = await sessions.between(addDays(today, -7 * COMPLETION_WEEKS), addDays(today, 1));
+  return completionSummary(
+    records.map(({ session }) => ({
+      date: session.date,
+      status: session.status,
+      activeMinutes: session.activeMinutes,
+    })),
+    today,
+  );
+}
 
 // The first day of the history window, for the store query.
 export function historyFrom(today: string): string {
@@ -50,7 +70,7 @@ export function sessionHistoryLines(records: readonly SessionRecord[], today: st
     ...(typeLines.length > 0 ? typeLines : ["- no past sessions yet"]),
     "",
     "PLAN ADHERENCE",
-    completionLine(live, addDays(today, -7 * COMPLETION_WEEKS)),
+    completionLine(records, today),
     weekdayLine(past),
   ];
 }
@@ -94,8 +114,12 @@ function statusLabel(status: SessionRecord["session"]["status"]): string {
   return status === "upcoming" || status === "unconfirmed" ? "not confirmed" : status;
 }
 
-function completionLine(live: readonly SessionRecord[], from: string): string {
-  const recent = live.filter(({ session }) => session.date >= from);
+// The 4-week rate, one line: plan generation's PLAN ADHERENCE, and chat context.
+export function completionLine(records: readonly SessionRecord[], today: string): string {
+  const from = addDays(today, -7 * COMPLETION_WEEKS);
+  const recent = records.filter(
+    ({ session }) => session.status !== "replaced" && session.date >= from && session.date < today,
+  );
   const rate = completion(
     recent.map(({ session }) => ({ status: session.status, activeMinutes: session.activeMinutes })),
   );

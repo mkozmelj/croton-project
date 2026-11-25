@@ -8,7 +8,7 @@ One Node.js process does everything:
 
 - a **Fastify** HTTP server (Telegram webhook, Strava webhook, OAuth routes, `/health`, two static pages, and the read-only `/dashboard`);
 - a **grammY** bot, wired into that server in production and long polling in development;
-- an in-process **scheduler** (`node-cron`) for the recap, the syncs, and the memory job;
+- an in-process **scheduler** (`node-cron`) for the recap, the morning check-in, the syncs, and the memory job;
 - a **background task runner** for work that must not block a webhook response.
 
 Postgres (Neon) holds all state. No in-memory state needs to survive a restart, except the literature vectors, which are reloaded from the database on boot.
@@ -102,6 +102,12 @@ docs/                   Guides (this folder) and design records
 
 `GET /dashboard` and its pages are server-rendered HTML with inline SVG charts and no JavaScript ([ADR-022](../02-architecture-decisions.md#adr-022-a-read-only-dashboard-at-a-fixed-url-behind-a-telegram-login)). `/dashboard/login` shows the Telegram Login Widget; `/dashboard/auth` checks Telegram's signature, the 5-minute `auth_date` window and the athlete's user ID, then sets a 30-day HMAC-signed cookie (`DASHBOARD_SESSION_SECRET`). One `onRequest` hook guards every other dashboard route, and a test asks each registered route without a valid cookie. Pages read through `db/planned-workouts.ts` (sessions joined with their activity and feedback); completion and progress numbers come from `training/completion.ts` and `training/progress.ts`. Locally (`NODE_ENV=development`) the server listens on `127.0.0.1` and `/dashboard/dev-login` signs in without Telegram.
 
+### The morning check-in
+
+Every day at 08:00 local (`agent/check-in.ts`, [ADR-021](../02-architecture-decisions.md#adr-021-planned-workouts-are-rows-with-a-status-and-a-session-type)): sessions from before the last 3 days still waiting for a match or an answer become `skipped` (source `timeout`), then the last 3 days' sessions still `upcoming` become `unconfirmed`. If there are any, one message lists them with **Done / Partly / Skipped** buttons (`bot/check-in.ts`, `callback_data = pw:<id>:<status>`). A tap writes the status straight to `planned_workouts` (source `athlete`) and redraws the message from the stored rows. A session an activity fulfilled keeps the match. No model call.
+
+The completion rate (`training/completion.ts`) shows in the Sunday recap question (this week and the last 4 weeks), in `/status` (4 weeks), both with a link to the dashboard when it's enabled, and as one line in the chat context.
+
 ### The weekly plan
 
 `agent/planner.ts`: refresh thresholds from Intervals.icu (best effort), build an extended context (6 weeks of per-sport totals, 12 months of monthly totals and peaks, CTL/ATL/ACWR, session-RPE load, the last 3 sessions of each session type over 12 weeks with plan adherence from `agent/session-history.ts`, calendar events for the week), then make one Sonnet call with **structured output** (the week-plan JSON schema). The call can make up to two `search_literature` rounds first. The result becomes an `apply_plan` proposal.
@@ -132,12 +138,12 @@ All tables are defined in [`src/db/schema.ts`](../../src/db/schema.ts). The migr
 
 - **Prompt caching** ([ADR-004](../02-architecture-decisions.md#adr-004-system-prompt-caching--split-static-from-dynamic)): tools and the static prompt (~7.7K tokens) form a byte-identical prefix cached for 1 hour. Only the dynamic context and the conversation are billed at the full input price.
 - **Routing** ([ADR-005](../02-architecture-decisions.md#adr-005-thinking-and-effort-policy-per-call-type)): Sonnet with low or medium effort where judgment matters, Haiku for the rest. If a Haiku call tries to write a week plan, the round is redone on Sonnet.
-- **Code instead of calls:** feedback buttons, threshold maths, plan matching and proposal rendering need no model call.
+- **Code instead of calls:** feedback and check-in buttons, threshold maths, plan matching and proposal rendering need no model call.
 - **The budget** is checked before every call and enforced in the wrapper, so there's no way around it.
 
 ## Testing
 
-- `npm run check` runs Biome, `tsc --noEmit` and Vitest (about 470 tests).
+- `npm run check` runs Biome, `tsc --noEmit` and Vitest (about 580 tests).
 - Stores and clients are injected, so tests use fakes. There are no network calls and no database in the test suite.
 - Fixtures under `src/integrations/*/test-fixtures.ts` follow real API response shapes with **fake values**. Keep it that way if you add any: never paste a real response containing your IDs, tokens or health data.
 - The retrieval eval (`src/knowledge/retrieval-eval.test.ts`) checks recall@5 against cached embedding vectors, so it runs offline.

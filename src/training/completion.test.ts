@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { completion, formatRate, longerThanPlanned } from "./completion.js";
+import { completion, completionSummary, formatRate, longerThanPlanned } from "./completion.js";
 
 describe("completion", () => {
   it("counts done, half of partial and skipped, and ignores the rest", () => {
@@ -35,5 +35,29 @@ describe("longerThanPlanned", () => {
     expect(longerThanPlanned(50, 60 * 60)).toBe(false);
     expect(longerThanPlanned(50, 61 * 60)).toBe(true);
     expect(longerThanPlanned(0, 3600)).toBe(false);
+  });
+});
+
+describe("completionSummary", () => {
+  const TODAY = "2026-11-29"; // a Sunday
+
+  it("splits this week from the last 4 weeks and counts open sessions up to yesterday", () => {
+    const summary = completionSummary(
+      [
+        { date: "2026-10-31", status: "skipped", activeMinutes: 60 }, // before the 4 weeks
+        { date: "2026-11-10", status: "skipped", activeMinutes: 60 },
+        { date: "2026-11-18", status: "unconfirmed", activeMinutes: 40 },
+        { date: "2026-11-24", status: "done", activeMinutes: 60 },
+        { date: "2026-11-26", status: "partial", activeMinutes: 40 },
+        { date: "2026-11-28", status: "upcoming", activeMinutes: 30 },
+        { date: TODAY, status: "done", activeMinutes: 90 },
+        { date: TODAY, status: "upcoming", activeMinutes: 30 }, // later today: not open
+        { date: "2026-11-27", status: "replaced", activeMinutes: 50 },
+      ],
+      TODAY,
+    );
+    expect(summary.week).toMatchObject({ counted: 3, done: 2, partial: 1, skipped: 0, open: 1 });
+    expect(summary.week.sessionsRate).toBeCloseTo(2.5 / 3);
+    expect(summary.recent).toMatchObject({ counted: 4, done: 2, partial: 1, skipped: 1, open: 2 });
   });
 });

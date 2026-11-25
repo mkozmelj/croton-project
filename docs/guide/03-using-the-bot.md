@@ -32,6 +32,7 @@ Once set up, Croton is a chat. Most of the time you write to it in plain languag
 /profile vdot 48.5
 /profile vdot 10k 45:30         VDOT worked out from a race result
 /profile availability Mon-Fri 1h before work, long sessions at weekends
+/profile equipment 25 m pool; pull buoy, fins, kickboard, no paddles
 /profile injuries Left Achilles, no speed work on track
 /profile name Alex
 /profile ftp 255 2026-09-20     optional trailing date: when it was measured

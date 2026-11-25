@@ -153,6 +153,28 @@ describe("createActionExecutor", () => {
     expect(await pending.store.live(1, ["onboarding"])).toHaveLength(0);
   });
 
+  it("adds equipment to the preferences, keeping the availability", async () => {
+    const { executor, pending, profile } = setup();
+    const row = await pending.store.create({
+      chatId: 1,
+      actionType: "update_profile",
+      payload: {
+        name: null,
+        background: null,
+        availability: null,
+        equipment: "25 m pool; pull buoy, fins",
+        injuryNotes: null,
+        raceMarkers: [],
+      },
+      expiresAt: later,
+    });
+    expect(await executor.confirm(row.id, 1)).toContain("Profile saved.");
+    expect(profile().preferences).toEqual({
+      longDay: "Sat",
+      equipment: "25 m pool; pull buoy, fins",
+    });
+  });
+
   it("says how many watch workouts went to Intervals.icu", async () => {
     const { executor, pending } = setup({ watchSent: 1 });
     const row = await pending.store.create({

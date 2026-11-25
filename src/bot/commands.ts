@@ -7,6 +7,7 @@ import type { Orchestrator } from "../agent/orchestrator.js";
 import type { Planner } from "../agent/planner.js";
 import { parseProfileEdit } from "../agent/profile-edit.js";
 import { loadSeason } from "../agent/season.js";
+import { loadCompletion } from "../agent/session-history.js";
 import type { ActivityStore } from "../db/activities.js";
 import type { AthleteProfileStore } from "../db/athlete-profile.js";
 import type { GoalStore } from "../db/goals.js";
@@ -15,6 +16,7 @@ import type { UsageStore } from "../db/llm-usage.js";
 import type { OAuthStateStore } from "../db/oauth-states.js";
 import type { OAuthProvider } from "../db/oauth-tokens.js";
 import type { PendingActionStore } from "../db/pending-actions.js";
+import type { PlannedWorkoutStore } from "../db/planned-workouts.js";
 import type { TrainingPlanStore } from "../db/training-plans.js";
 import { parseBackground } from "../training/background.js";
 import { addDays, localDate, localMidnight, monthStart, weekStart } from "../utils/dates.js";
@@ -79,6 +81,10 @@ export type CommandDeps = {
   fitness: Pick<FitnessService, "latest">;
   goals: Pick<GoalStore, "activeInSeasons">;
   plans: Pick<TrainingPlanStore, "forWeek">;
+  // ADR-021: planned sessions, for the completion rate in /status and /recap.
+  sessions: Pick<PlannedWorkoutStore, "between">;
+  // The dashboard's URL when it's enabled (ADR-022), linked from /status and /recap.
+  dashboardUrl: string | null;
   pending: Pick<PendingActionStore, "live" | "create">;
   planner: Pick<Planner, "startRecap" | "generate">;
   onboarding: Pick<Orchestrator, "startOnboarding">;
@@ -132,18 +138,21 @@ export function registerCommands(bot: Bot, deps: CommandDeps): void {
     const instant = now();
     const day = localDate(instant, deps.timeZone);
     const start = weekStart(day);
-    const [week, recentHealth, spendEur, stravaConnected, season] = await Promise.all([
+    const [week, recentHealth, spendEur, stravaConnected, season, completion] = await Promise.all([
       deps.activities.between(localMidnight(start, deps.timeZone), instant),
       deps.health.since(addDays(day, -2)),
       deps.usage.spendSince(monthStart(day)),
       deps.connect.strava?.isConnected() ?? Promise.resolve(false),
       loadSeason(deps.goals, day),
+      loadCompletion(deps.sessions, day),
     ]);
     await ctx.reply(
       statusText({
         phase: season.aGoal
           ? `${season.phase ?? "unknown"} (A goal: ${season.aGoal.event.name}, ${season.aGoal.event.date})`
           : "unknown, no A goal set (/goals)",
+        completion,
+        dashboardUrl: deps.dashboardUrl,
         weekStart: start,
         weekTotals: totalsBySport(week),
         lastActivity: week.at(-1) ?? null,
@@ -191,7 +200,11 @@ export function registerCommands(bot: Bot, deps: CommandDeps): void {
   bot.command("recap", async (ctx) => {
     const feedback = ctx.match.trim();
     if (!feedback) {
-      await ctx.reply(recapQuestionText((await deps.planner.startRecap()).weekStart));
+      const [{ weekStart: target }, summary] = await Promise.all([
+        deps.planner.startRecap(),
+        loadCompletion(deps.sessions, today()),
+      ]);
+      await ctx.reply(recapQuestionText(target, { summary, dashboardUrl: deps.dashboardUrl }));
       return;
     }
     try {

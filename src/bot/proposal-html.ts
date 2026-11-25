@@ -56,6 +56,7 @@ export function proposalHtml(row: Pick<PendingActionRow, "actionType" | "payload
         if (b.notes) lines.push(`• Notes: ${esc(b.notes)}`);
       }
       if (p.availability) lines.push(`• Availability: ${esc(p.availability)}`);
+      if (p.equipment) lines.push(`• Equipment: ${esc(p.equipment)}`);
       if (p.injuryNotes) lines.push(`• Injuries: ${esc(p.injuryNotes)}`);
       if (p.raceMarkers.length > 0) {
         lines.push("", "<b>Adds</b>", ...p.raceMarkers.map(markerLine));

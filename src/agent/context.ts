@@ -18,6 +18,7 @@ import {
   wattsPerKg,
   weeklyBody,
 } from "../training/body.js";
+import { COMPLETION_WEEKS } from "../training/completion.js";
 import {
   describeAge,
   describeSource,
@@ -42,7 +43,7 @@ import type { FitnessService } from "./fitness.js";
 import { historyStart, monthlyLines, peakLines } from "./history-summary.js";
 import { planLines } from "./plan-format.js";
 import { loadSeason } from "./season.js";
-import { historyFrom, sessionHistoryLines } from "./session-history.js";
+import { completionLine, historyFrom, sessionHistoryLines } from "./session-history.js";
 
 // Days of activities listed one by one; older weeks only appear as totals.
 const ACTIVITY_DAYS = 10;
@@ -68,7 +69,8 @@ type ContextDeps = {
   pending: Pick<PendingActionStore, "live">;
   memories: Pick<ConversationMemoryStore, "recent">;
   feedback: Pick<ActivityFeedbackStore, "forActivities">;
-  // ADR-021: past planned sessions, read for plan generation only.
+  // ADR-021: past planned sessions. Plan generation gets the history by type, chat the 4-week
+  // completion rate.
   sessions: Pick<PlannedWorkoutStore, "between">;
   chatId: number;
   timeZone: string;
@@ -128,7 +130,10 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
         deps.plans.forWeek(nextWeek),
         deps.pending.live(deps.chatId, CONFIRMATION_TYPES),
         deps.memories.recent(MEMORY_NOTES),
-        baseline ? deps.sessions.between(historyFrom(today), today) : Promise.resolve([]),
+        deps.sessions.between(
+          baseline ? historyFrom(today) : addDays(today, -7 * COMPLETION_WEEKS),
+          today,
+        ),
       ]);
 
       const dayOf = (at: Date) => localDate(at, deps.timeZone);
@@ -221,7 +226,7 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
               "",
               ...sessionHistoryLines(sessions, today),
             ]
-          : ["", ...loadLines(health)]),
+          : ["", ...loadLines(health), "", "PLAN ADHERENCE", completionLine(sessions, today)]),
         "",
         `BODY COMPOSITION, weekly averages over ${BODY_WEEKS} weeks (judge the trend, not single days)`,
         ...bodyLines(bodyReadings, bodyFrom),
@@ -344,7 +349,16 @@ function profileLines(profile: AthleteProfile | null): string[] {
   } else {
     lines.push("- Training background: not collected yet (offer /onboard).");
   }
-  if (profile.preferences) lines.push(`- Preferences: ${JSON.stringify(profile.preferences)}`);
+  const { availability, equipment, ...preferences } = profile.preferences ?? {};
+  if (typeof availability === "string") lines.push(`- Availability: ${availability}`);
+  lines.push(
+    typeof equipment === "string"
+      ? `- Equipment: ${equipment}`
+      : "- Equipment: not recorded (ask before prescribing swim aids such as paddles or fins)",
+  );
+  if (Object.keys(preferences).length > 0) {
+    lines.push(`- Preferences: ${JSON.stringify(preferences)}`);
+  }
   if (profile.injuryNotes) lines.push(`- Injury notes: ${profile.injuryNotes}`);
   return lines;
 }
@@ -457,7 +471,8 @@ const ONBOARDING_LINES = [
   "1. Years training per sport and typical weekly hours.",
   "2. Race results from the last ~18 months (date, event, distance, time).",
   "3. Weekly availability (which days, time windows, long-session day, rest days).",
-  "4. Injuries, current and past.",
-  "5. Thresholds not listed under FITNESS MARKERS (FTP, LTHR, threshold pace, CSS, max HR).",
+  "4. Equipment: pool length, swim aids (pull buoy, paddles, fins, kickboard, snorkel), bike trainer.",
+  "5. Injuries, current and past.",
+  "6. Thresholds not listed under FITNESS MARKERS (FTP, LTHR, threshold pace, CSS, max HR).",
   "Then call propose_profile_update with everything collected (background.recent_results holds the races) and propose_fitness_marker for each reported threshold. Onboarding ends when the athlete confirms the profile.",
 ];

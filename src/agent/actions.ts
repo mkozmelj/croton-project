@@ -66,6 +66,9 @@ export const updateProfilePayload = z.object({
   name: z.string().nullable(),
   background: backgroundSchema.nullable(),
   availability: z.string().nullable(),
+  // Training equipment and facilities in the athlete's words (pool length, swim aids, trainer).
+  // Defaults so proposals stored before the field still parse.
+  equipment: z.string().nullable().default(null),
   injuryNotes: z.string().nullable(),
   // VDOT markers computed from background.recent_results (ADR-016).
   raceMarkers: z.array(markerSchema),
@@ -135,6 +138,7 @@ export function describeProposal(row: Pick<PendingActionRow, "actionType" | "pay
         if (b.notes) lines.push(`- Notes: ${b.notes}`);
       }
       if (p.availability) lines.push(`- Availability: ${p.availability}`);
+      if (p.equipment) lines.push(`- Equipment: ${p.equipment}`);
       if (p.injuryNotes) lines.push(`- Injuries: ${p.injuryNotes}`);
       for (const marker of p.raceMarkers) lines.push(`- Adds ${markerLine(marker)}`);
       return lines.join("\n");

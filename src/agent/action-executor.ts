@@ -57,8 +57,14 @@ export function createActionExecutor(deps: ExecutorDeps): ActionExecutor {
           ...(p.name ? { name: p.name } : {}),
           ...(p.background ? { background: p.background } : {}),
           ...(p.injuryNotes ? { injuryNotes: p.injuryNotes } : {}),
-          ...(p.availability
-            ? { preferences: { ...current?.preferences, availability: p.availability } }
+          ...(p.availability || p.equipment
+            ? {
+                preferences: {
+                  ...current?.preferences,
+                  ...(p.availability ? { availability: p.availability } : {}),
+                  ...(p.equipment ? { equipment: p.equipment } : {}),
+                },
+              }
             : {}),
         });
         if (p.raceMarkers.length > 0) await deps.fitness.record(p.raceMarkers);

@@ -60,6 +60,7 @@ function profileChange(changes: Partial<UpdateProfilePayload>): ProfileEdit {
       name: null,
       background: null,
       availability: null,
+      equipment: null,
       injuryNotes: null,
       raceMarkers: [],
       ...changes,
@@ -83,6 +84,10 @@ export function parseProfileEdit(args: string, today: string): ProfileEdit {
       return text
         ? profileChange({ availability: text })
         : fail("Add your availability: /profile availability Mon rest, Tue/Thu 6:30-7:45");
+    case "equipment":
+      return text
+        ? profileChange({ equipment: text })
+        : fail("Add your equipment: /profile equipment 25 m pool; pull buoy, fins, kickboard");
     case "injuries":
     case "injury":
       return text

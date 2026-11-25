@@ -189,13 +189,20 @@ export function createToolHandlers(deps: ToolDeps): ToolHandlers {
     async [TOOL_NAMES.profile](raw, context) {
       const input = parse(proposeProfileInput, raw);
       if (typeof input === "string") return failure(input);
-      if (!input.name && !input.background && !input.availability && !input.injury_notes) {
+      if (
+        !input.name &&
+        !input.background &&
+        !input.availability &&
+        !input.equipment &&
+        !input.injury_notes
+      ) {
         return failure("Nothing to update: pass at least one field.");
       }
       const payload: UpdateProfilePayload = {
         name: input.name,
         background: input.background,
         availability: input.availability,
+        equipment: input.equipment,
         injuryNotes: input.injury_notes,
         raceMarkers: raceMarkersFrom(input.background),
       };

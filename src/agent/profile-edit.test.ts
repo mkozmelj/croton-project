@@ -65,6 +65,7 @@ describe("parseProfileEdit", () => {
         name: null,
         background: null,
         availability: "Mon rest, long ride Sat",
+        equipment: null,
         injuryNotes: null,
         raceMarkers: [],
       },
@@ -74,5 +75,12 @@ describe("parseProfileEdit", () => {
     });
     expect(parseProfileEdit("name Alex", TODAY)).toMatchObject({ payload: { name: "Alex" } });
     expect(parseProfileEdit("availability", TODAY).ok).toBe(false);
+  });
+
+  it("proposes the equipment list in the athlete's words", () => {
+    expect(parseProfileEdit("equipment 25 m pool; pull buoy, fins", TODAY)).toMatchObject({
+      payload: { equipment: "25 m pool; pull buoy, fins", availability: null },
+    });
+    expect(parseProfileEdit("equipment", TODAY).ok).toBe(false);
   });
 });

@@ -47,6 +47,12 @@ export const proposeProfileInput = z.object({
     .describe(
       "Weekly availability in the athlete's words, e.g. 'Mon rest, Tue/Thu 6:30-7:45, long sessions Sat'",
     ),
+  equipment: z
+    .string()
+    .nullable()
+    .describe(
+      "Training equipment and facilities in the athlete's words, replacing the stored list, e.g. '25 m pool; pull buoy, fins, kickboard, no paddles; Wattbike at the office'",
+    ),
   injury_notes: z
     .string()
     .nullable()
@@ -120,7 +126,7 @@ export const CHAT_TOOLS: Tool[] = [
   {
     name: TOOL_NAMES.profile,
     description:
-      "Propose an update to the athlete profile: name, training background (years per sport, typical weekly hours, race results from the last ~18 months), weekly availability, injury notes. Call this during onboarding once you've collected the answers, or whenever the athlete tells you about a lasting change (new availability, an injury). Only the fields you pass are changed. Nothing is saved until the athlete confirms.",
+      "Propose an update to the athlete profile: name, training background (years per sport, typical weekly hours, race results from the last ~18 months), weekly availability, training equipment, injury notes. Call this during onboarding once you've collected the answers, or whenever the athlete tells you about a lasting change (new availability, new equipment, an injury). Only the fields you pass are changed. Nothing is saved until the athlete confirms.",
     input_schema: inputSchema(proposeProfileInput),
   },
   {

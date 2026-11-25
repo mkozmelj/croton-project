@@ -330,7 +330,7 @@ describe("createContextBuilder().build", () => {
     expect(text).toContain("- run: biggest week Mon 2026-01-12");
   });
 
-  it("gives plan generation 12 weeks of session history, and chat none", async () => {
+  it("gives plan generation 12 weeks of session history, and chat the 4-week rate", async () => {
     const { context, sessionRanges } = builder([]);
     const text = await context.build({ detail: "baseline" });
     expect(sessionRanges).toEqual([["2026-07-02", "2026-09-24"]]);
@@ -339,8 +339,10 @@ describe("createContextBuilder().build", () => {
     expect(text).toContain("PLAN ADHERENCE");
 
     const chat = builder([]);
-    expect(await chat.context.build()).not.toContain("SESSION HISTORY");
-    expect(chat.sessionRanges).toEqual([]);
+    const chatText = await chat.context.build();
+    expect(chatText).not.toContain("SESSION HISTORY");
+    expect(chatText).toContain("PLAN ADHERENCE\n- Last 4 weeks: nothing counted yet");
+    expect(chat.sessionRanges).toEqual([["2026-08-27", "2026-09-24"]]);
   });
 
   it("points to /import when there is no history", async () => {

@@ -1,4 +1,4 @@
-import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import {
   activeMinutes,
   storedWorkoutSchema,
@@ -10,6 +10,7 @@ import {
 } from "../training/plan.js";
 import type { Replacement } from "../training/plan-revisions.js";
 import type { Database } from "./client.js";
+import type { PlannedWorkoutRow } from "./planned-workouts.js";
 import { plannedWorkouts, trainingPlans } from "./schema.js";
 
 // ADR-021: a week is its training_plans row (the week-level fields) plus its planned_workouts
@@ -47,9 +48,24 @@ export type TrainingPlanStore = {
   applyWeek(week: ApplyWeek): Promise<void>;
   // A synced activity fulfilled this session. Moves the activity off any other session.
   setMatch(workoutId: number, activityId: number, status: "done" | "partial"): Promise<void>;
+  // ADR-021 morning check-in: sessions with `from <= date < before` still `upcoming` (no
+  // activity matched them) become `unconfirmed`. Returns them, in date and time order.
+  markUnconfirmed(from: string, before: string): Promise<PlannedWorkoutRow[]>;
+  // Sessions before `before` still waiting for an answer (`upcoming` or `unconfirmed`) become
+  // `skipped`, source `timeout`. Returns how many.
+  expireUnanswered(before: string): Promise<number>;
+  // The athlete's check-in answer. A session an activity fulfilled keeps the match (a match
+  // always wins), and a replaced or future one takes no answer: both return false.
+  setAnswer(workoutId: number, status: CheckInAnswer, today: string): Promise<boolean>;
 };
 
-type Row = typeof plannedWorkouts.$inferSelect;
+export const CHECK_IN_ANSWERS = ["done", "partial", "skipped"] as const;
+export type CheckInAnswer = (typeof CHECK_IN_ANSWERS)[number];
+
+// Statuses an athlete's answer may overwrite: an earlier answer, a timeout, or no answer yet.
+const ANSWERABLE: WorkoutStatus[] = ["unconfirmed", "done", "partial", "skipped"];
+
+type Row = PlannedWorkoutRow;
 
 export function createTrainingPlanStore(db: Database): TrainingPlanStore {
   const idOfKey = (key: string) =>
@@ -140,7 +156,56 @@ export function createTrainingPlanStore(db: Database): TrainingPlanStore {
           .where(eq(plannedWorkouts.id, workoutId)),
       ]);
     },
+
+    async markUnconfirmed(from, before) {
+      return db
+        .update(plannedWorkouts)
+        .set({ status: "unconfirmed", statusSource: null, updatedAt: new Date() })
+        .where(
+          and(
+            eq(plannedWorkouts.status, "upcoming"),
+            gte(plannedWorkouts.date, from),
+            lt(plannedWorkouts.date, before),
+          ),
+        )
+        .returning()
+        .then((rows) => rows.sort(byDateAndTime));
+    },
+
+    async expireUnanswered(before) {
+      const rows = await db
+        .update(plannedWorkouts)
+        .set({ status: "skipped", statusSource: "timeout", updatedAt: new Date() })
+        .where(
+          and(
+            inArray(plannedWorkouts.status, ["upcoming", "unconfirmed"]),
+            lt(plannedWorkouts.date, before),
+          ),
+        )
+        .returning({ id: plannedWorkouts.id });
+      return rows.length;
+    },
+
+    async setAnswer(workoutId, status, today) {
+      const rows = await db
+        .update(plannedWorkouts)
+        .set({ status, statusSource: "athlete", updatedAt: new Date() })
+        .where(
+          and(
+            eq(plannedWorkouts.id, workoutId),
+            isNull(plannedWorkouts.activityId),
+            inArray(plannedWorkouts.status, ANSWERABLE),
+            lt(plannedWorkouts.date, today),
+          ),
+        )
+        .returning({ id: plannedWorkouts.id });
+      return rows.length > 0;
+    },
   };
+}
+
+function byDateAndTime(a: Row, b: Row): number {
+  return a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime) || a.id - b.id;
 }
 
 // The columns a planned session writes. `active_minutes` is always computed (ADR-021).
