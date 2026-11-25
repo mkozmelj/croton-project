@@ -104,7 +104,7 @@ docs/                   Guides (this folder) and design records
 
 ### The weekly plan
 
-`agent/planner.ts`: refresh thresholds from Intervals.icu (best effort), build an extended context (6 weeks of per-sport totals, 12 months of monthly totals and peaks, CTL/ATL/ACWR, session-RPE load, calendar events for the week), then make one Sonnet call with **structured output** (the week-plan JSON schema). The call can make up to two `search_literature` rounds first. The result becomes an `apply_plan` proposal.
+`agent/planner.ts`: refresh thresholds from Intervals.icu (best effort), build an extended context (6 weeks of per-sport totals, 12 months of monthly totals and peaks, CTL/ATL/ACWR, session-RPE load, the last 3 sessions of each session type over 12 weeks with plan adherence from `agent/session-history.ts`, calendar events for the week), then make one Sonnet call with **structured output** (the week-plan JSON schema). The call can make up to two `search_literature` rounds first. The result becomes an `apply_plan` proposal.
 
 ## Data model
 

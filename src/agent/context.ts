@@ -6,6 +6,7 @@ import type { StoredMarker } from "../db/fitness-markers.js";
 import type { GoalStore, GoalWithEvent } from "../db/goals.js";
 import type { HealthMetrics, HealthMetricsStore } from "../db/health-metrics.js";
 import type { PendingActionStore } from "../db/pending-actions.js";
+import type { PlannedWorkoutStore } from "../db/planned-workouts.js";
 import type { TrainingPlanStore } from "../db/training-plans.js";
 import { parseBackground } from "../training/background.js";
 import {
@@ -41,6 +42,7 @@ import type { FitnessService } from "./fitness.js";
 import { historyStart, monthlyLines, peakLines } from "./history-summary.js";
 import { planLines } from "./plan-format.js";
 import { loadSeason } from "./season.js";
+import { historyFrom, sessionHistoryLines } from "./session-history.js";
 
 // Days of activities listed one by one; older weeks only appear as totals.
 const ACTIVITY_DAYS = 10;
@@ -66,13 +68,16 @@ type ContextDeps = {
   pending: Pick<PendingActionStore, "live">;
   memories: Pick<ConversationMemoryStore, "recent">;
   feedback: Pick<ActivityFeedbackStore, "forActivities">;
+  // ADR-021: past planned sessions, read for plan generation only.
+  sessions: Pick<PlannedWorkoutStore, "between">;
   chatId: number;
   timeZone: string;
   now?: () => Date;
 };
 
 export type ContextOptions = {
-  // 'baseline' (plan generation): 6 weeks of per-sport totals and the CTL/ATL trend.
+  // 'baseline' (plan generation): 6 weeks of per-sport totals and the CTL/ATL trend, and the
+  // session history by type with plan adherence (ADR-021).
   detail?: "chat" | "baseline";
   // Chat onboarding is running: adds the checklist of what to collect.
   onboarding?: boolean;
@@ -99,20 +104,32 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
       const bodyFrom = addDays(thisWeek, -7 * (BODY_WEEKS - 1));
       const listFrom = addDays(today, -(ACTIVITY_DAYS - 1));
       // Plan generation also gets the year behind (monthly totals and peaks).
-      const activitiesFrom = options.detail === "baseline" ? historyStart(thisWeek) : baselineFrom;
+      const baseline = options.detail === "baseline";
+      const activitiesFrom = baseline ? historyStart(thisWeek) : baselineFrom;
 
-      const [profile, activities, health, markers, season, thisPlan, nextPlan, pending, memories] =
-        await Promise.all([
-          deps.profile.get(),
-          deps.activities.between(localMidnight(activitiesFrom, deps.timeZone), instant),
-          deps.health.since(bodyFrom < baselineFrom ? bodyFrom : baselineFrom),
-          deps.fitness.latest(),
-          loadSeason(deps.goals, today),
-          deps.plans.forWeek(thisWeek),
-          deps.plans.forWeek(nextWeek),
-          deps.pending.live(deps.chatId, CONFIRMATION_TYPES),
-          deps.memories.recent(MEMORY_NOTES),
-        ]);
+      const [
+        profile,
+        activities,
+        health,
+        markers,
+        season,
+        thisPlan,
+        nextPlan,
+        pending,
+        memories,
+        sessions,
+      ] = await Promise.all([
+        deps.profile.get(),
+        deps.activities.between(localMidnight(activitiesFrom, deps.timeZone), instant),
+        deps.health.since(bodyFrom < baselineFrom ? bodyFrom : baselineFrom),
+        deps.fitness.latest(),
+        loadSeason(deps.goals, today),
+        deps.plans.forWeek(thisWeek),
+        deps.plans.forWeek(nextWeek),
+        deps.pending.live(deps.chatId, CONFIRMATION_TYPES),
+        deps.memories.recent(MEMORY_NOTES),
+        baseline ? deps.sessions.between(historyFrom(today), today) : Promise.resolve([]),
+      ]);
 
       const dayOf = (at: Date) => localDate(at, deps.timeZone);
       const inWeek = (start: string) =>
@@ -181,7 +198,7 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
         `LAST WEEK (Mon ${lastWeek}), by sport`,
         ...weekLines(lastWeek),
         ...rpeLoadLine(lastWeek),
-        ...(options.detail === "baseline"
+        ...(baseline
           ? [
               "",
               ...baselineLines(baselineFrom, inWeek, feedback),
@@ -201,6 +218,8 @@ export function createContextBuilder(deps: ContextDeps): ContextBuilder {
                 peakLines(activities, (a) => dayOf(a.startedAt)),
                 "- none",
               ),
+              "",
+              ...sessionHistoryLines(sessions, today),
             ]
           : ["", ...loadLines(health)]),
         "",

@@ -5,6 +5,7 @@ import type { ConversationMemory } from "../db/conversation-memories.js";
 import type { StoredMarker } from "../db/fitness-markers.js";
 import type { GoalWithEvent } from "../db/goals.js";
 import type { HealthMetrics } from "../db/health-metrics.js";
+import type { SessionRecord } from "../db/planned-workouts.js";
 import { storedActivity } from "../integrations/strava/test-fixtures.js";
 import { createContextBuilder } from "./context.js";
 
@@ -85,10 +86,12 @@ type Extras = {
   goals?: GoalWithEvent[];
   memories?: ConversationMemory[];
   feedback?: ActivityFeedback[];
+  sessions?: SessionRecord[];
 };
 
 function builder(activities: Activity[], rows: HealthMetrics[] = [], extras: Extras = {}) {
   const ranges: [Date, Date][] = [];
+  const sessionRanges: [string, string][] = [];
   const context = createContextBuilder({
     profile: { get: async () => null },
     activities: {
@@ -111,11 +114,17 @@ function builder(activities: Activity[], rows: HealthMetrics[] = [], extras: Ext
             .map((f) => [f.activityId, f]),
         ),
     },
+    sessions: {
+      between: async (from, to) => {
+        sessionRanges.push([from, to]);
+        return extras.sessions ?? [];
+      },
+    },
     chatId: 1,
     timeZone: "Europe/Ljubljana",
     now: () => NOW,
   });
-  return { context, ranges };
+  return { context, ranges, sessionRanges };
 }
 
 function feedback(overrides: Partial<ActivityFeedback>): ActivityFeedback {
@@ -319,6 +328,19 @@ describe("createContextBuilder().build", () => {
     expect(ranges[0]?.[0].toISOString()).toBe("2025-09-21T22:00:00.000Z"); // Mon 22 Sep 2025
     expect(text).toContain("- 2026-01: run: 1x, 1:30:00, 8.10 km");
     expect(text).toContain("- run: biggest week Mon 2026-01-12");
+  });
+
+  it("gives plan generation 12 weeks of session history, and chat none", async () => {
+    const { context, sessionRanges } = builder([]);
+    const text = await context.build({ detail: "baseline" });
+    expect(sessionRanges).toEqual([["2026-07-02", "2026-09-24"]]);
+    expect(text).toContain("SESSION HISTORY BY TYPE");
+    expect(text).toContain("- no past sessions yet");
+    expect(text).toContain("PLAN ADHERENCE");
+
+    const chat = builder([]);
+    expect(await chat.context.build()).not.toContain("SESSION HISTORY");
+    expect(chat.sessionRanges).toEqual([]);
   });
 
   it("points to /import when there is no history", async () => {

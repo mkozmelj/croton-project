@@ -585,7 +585,7 @@ Removing DRM is prohibited in the EU even for owned copies (InfoSoc Directive Ar
   - for each session type used in the last `PLANNER_HISTORY_WEEKS` (12) weeks, its last `PLANNER_HISTORY_PER_TYPE` (3) sessions, one line each: date, title, main set from `structure`, active minutes planned / done, status, RPE and feel. E.g. `run_threshold: 11-04 "4x8 min Z4" 50/48 min done, RPE 7 good`.
   - the 4-week completion rates, and how many sessions per weekday were moved or skipped.
   - an instruction in the static prompt: progress a session type from its last occurrence (one variable at a time: reps, duration, or target) rather than repeat it, and vary non-key sessions.
-  Roughly 1–2k tokens a planning call, a few cents a month. The two constants cap it.
+  Roughly 1–2k tokens a planning call, a few cents a month. The two constants cap it. Built in `src/agent/session-history.ts` (2026-11-25): only sessions before today (later ones are the plan being written), past sessions still `upcoming` or `unconfirmed` show as "not confirmed", and the instruction sits in the planner's prompt next to the `session_type` rule. About 1.6k tokens on production data.
 - **Telegram:** the Sunday recap gets one line (this week's sessions % and hours %, and the 4-week figures), and `/status` gets the 4-week rate. Both link to the dashboard (ADR-022).
 
 **Session types** (`SESSION_TYPES` in `src/training/session-types.ts`). Structured output enforces the enum; `planIssues()` checks that the type fits the sport (`run_*` for run and trail run, `brick_*` for brick legs, `race` and `field_test` for any sport, `field_test` exactly when `field_test` is set). The progress number is what the dashboard's session-type history shows (whole activity in v1).

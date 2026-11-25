@@ -158,6 +158,7 @@ const plans = createTrainingPlanStore(db);
 const pending = createPendingActionStore(db);
 const conversations = createConversationStore(db);
 const memories = createConversationMemoryStore(db);
+const planned = createPlannedWorkoutStore(db);
 const context = createContextBuilder({
   profile,
   activities,
@@ -168,6 +169,7 @@ const context = createContextBuilder({
   pending,
   memories,
   feedback: activityFeedback,
+  sessions: planned,
   chatId,
   timeZone: env.TIMEZONE,
 });
@@ -206,7 +208,7 @@ if (transport.mode === "webhook") {
 if (env.DASHBOARD_SESSION_SECRET) {
   let botUsername: string | undefined;
   registerDashboard(app, {
-    planned: createPlannedWorkoutStore(db),
+    planned,
     plans,
     activities,
     botToken: env.TELEGRAM_BOT_TOKEN,
